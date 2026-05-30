@@ -2984,7 +2984,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "-L", "--max-lines",
+        "-ml", "--max-lines",
         type=int,
         default=None,
         help=(
@@ -2995,7 +2995,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "-I", "--max-interactions",
+        "-mi", "--max-interactions",
         type=int,
         default=None,
         help=(
@@ -3006,7 +3006,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--input-compact",
+        "-ic", "--input-compact",
         type=Path,
         action="append",
         default=[],
@@ -3018,7 +3018,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--input-restart",
+        "-ir", "--input-restart",
         type=Path,
         action="append",
         default=[],
@@ -3030,7 +3030,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--input-transcript",
+        "-it", "--input-transcript",
         type=Path,
         action="append",
         default=[],
@@ -3042,21 +3042,21 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--output-compact",
+        "-oc", "--output-compact",
         type=Path,
         default=None,
         help="Explicit output path for the compact prompt file. Directory created if needed.",
     )
 
     parser.add_argument(
-        "--output-restart",
+        "-or", "--output-restart",
         type=Path,
         default=None,
         help="Explicit output path for the restart context file. Directory created if needed.",
     )
 
     parser.add_argument(
-        "--output-transcript",
+        "-ot", "--output-transcript",
         type=Path,
         default=None,
         help="Explicit output path for the transcript file. Directory created if needed.",
