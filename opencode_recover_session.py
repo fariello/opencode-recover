@@ -2984,7 +2984,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "-L", "-ml", "--max-lines",
+        "-ml", "--max-lines",
         type=int,
         default=None,
         help=(
@@ -2995,7 +2995,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "-I", "-mi", "--max-interactions",
+        "-mi", "--max-interactions",
         type=int,
         default=None,
         help=(
