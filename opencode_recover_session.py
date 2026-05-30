@@ -590,11 +590,11 @@ def call_compaction_api(
     if usage:
         actual_input = usage.get("prompt_tokens", 0)
         actual_output = usage.get("completion_tokens", 0)
-        log(f"Actual tokens — input: {actual_input}, output: {actual_output}", verbosity)
+        print(f"  Actual tokens — input: {actual_input:,}, output: {actual_output:,}")
         if model.cost_input is not None and model.cost_output is not None:
             actual_cost = estimate_cost(actual_input, actual_output, model)
             if actual_cost is not None:
-                log(f"Actual cost: ${actual_cost:.4f}", verbosity)
+                print(f"  Actual cost:  {color_bold(f'${actual_cost:.4f}')}")
 
     return content
 
@@ -3447,6 +3447,18 @@ def main() -> None:
                 verbosity=verbosity,
             )
             print()
+
+        # If only cleaning was requested (no recovery/compaction), exit early.
+        clean_only = (
+            (args.clean or args.clean_previous)
+            and not args.use_model
+            and not args.input_compact
+            and not args.input_restart
+            and not args.input_transcript
+            and not args.keep_temp
+        )
+        if clean_only:
+            return
 
         if args.keep_temp:
             temp_dir = Path(tempfile.mkdtemp(prefix="opencode-recovery-"))
