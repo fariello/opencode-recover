@@ -42,11 +42,22 @@ Write output to explicit paths:
         --output-restart ./out/restart.md \\
         --output-compact ./out/compact-prompt.md
 
+Clean up only (no export or recovery):
+    ./opencode_recover_session.py -s SESSION_ID -c --clean-previous
+
 Clean up before generating new output:
-    ./opencode_recover_session.py --session SESSION_ID --clean --clean-previous
+    ./opencode_recover_session.py -s SESSION_ID -c --clean-previous -mi 50
 
 Show the compaction prompt template:
     ./opencode_recover_session.py --show-compaction-prompt
+
+Short forms:
+    -s  --session             -d  --session-dir        -o  --out
+    -k  --keep-temp           -c  --clean              -t  --include-tools
+    -ml --max-lines           -mi --max-interactions   -m  --use-model
+    -ic --input-compact       -ir --input-restart      -it --input-transcript
+    -oc --output-compact      -or --output-restart     -ot --output-transcript
+    -v  --verbose
 
 Notes:
     Requires the `opencode` CLI to be installed and available on PATH.
@@ -55,7 +66,10 @@ Notes:
 
     When --use-model is specified, the session transcript is sent to an
     external LLM API endpoint (configured in ~/.config/opencode/opencode.json).
-    The script shows a cost estimate and asks for confirmation before sending.
+    The script shows estimated and actual token counts and costs.
+
+    When only --clean and/or --clean-previous are specified (without --use-model,
+    --input-*, or --keep-temp), the script cleans and exits without exporting.
 
     Output files:
       *.transcript.md    - Raw consolidated transcript (user/assistant turns)
