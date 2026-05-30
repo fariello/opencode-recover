@@ -503,13 +503,7 @@ def call_compaction_api(
         "messages": [
             {
                 "role": "system",
-                "content": (
-                    "You are a precise summarization assistant. Your task is to produce "
-                    "a compact, accurate Markdown restart document from a recovered "
-                    "conversation transcript. Be thorough but succinct. Preserve all "
-                    "critical details: decisions made, files changed, commands run, "
-                    "errors encountered, and next steps. Do NOT invent information."
-                ),
+                "content": COMPACTION_SYSTEM_PROMPT,
             },
             {
                 "role": "user",
@@ -2328,17 +2322,206 @@ After reading it, provide a brief continuation plan. Ask for clarification only 
 """
 
 
+COMPACTION_SYSTEM_PROMPT: str = """\
+You are a session-continuity assistant. Follow the instructions in the user \
+message exactly. Produce only the requested Markdown document with no preamble \
+or commentary.\
+"""
+
+COMPACTION_USER_PROMPT_TEMPLATE: str = """\
+# Session Restart Document Generator
+
+You are an expert session-continuity assistant. You are converting a recovered \
+opencode transcript into a compact, precise Markdown restart document that \
+allows a fresh opencode coding agent to continue the work safely and efficiently.
+
+Your output will be saved to a file and read directly by a fresh opencode \
+agent at the start of a new session. That agent will have no other context. \
+It will rely entirely on your output.
+
+## Source Material
+
+- Original session ID: `{session_id}`
+- Original session title: `{session_title}`
+- Transcript: {turn_count} turns, {interaction_count} interactions, \
+{line_count} lines.
+- Truncation: {truncation_note}
+
+The transcript was recovered from an opencode session that became unusable \
+(compaction failure, context overflow, crash, or similar). It may contain \
+user messages, agent responses, partial tool-call details, repeated status \
+text, errors, incomplete sections, and references to files, commands, commits, \
+tests, or decisions. It may be incomplete.
+
+The most recent exchanges reflect the user's active working context at the \
+time the session ended.
+
+## Core Rules
+
+1. Do not invent information.
+2. Only include claims supported by the transcript.
+3. If something is likely but not certain, label it as "Inference:".
+4. Preserve exact file paths, command names, branch names, commit hashes, \
+package names, error messages, and version/tool details when they matter.
+5. Do not include long raw code blocks unless essential to understanding \
+the current state, a bug, or a decision. Prefer concise summaries.
+6. Capture objectives, constraints, preferences, and reasoning behind \
+important decisions.
+7. Identify what was completed, what remains, and what must not be redone.
+8. Preserve operational details the next coding agent would need.
+9. If the transcript is truncated or incomplete, say what is missing and \
+how that affects confidence.
+10. Do not include instructions for the user.
+11. Do not include a suggested message for the user to paste.
+12. Write the output as context and instructions for the opencode agent only.
+
+---
+
+## Transcript
+
+```text
+{transcript_content}
+```
+
+---
+
+## Output Requirements
+
+Now produce a single Markdown document with the following structure. \
+Consider the entire transcript for context, but give particular weight to \
+the most recent exchanges when determining current state, active intent, \
+and immediate next steps.
+
+# Restart Context for opencode
+
+## 1. Project Summary
+
+In 2 to 4 sentences: what the session was about, what project or task was \
+being worked on, and why.
+
+## 2. Current State
+
+Note any uncertainty caused by transcript gaps or missing tool-call details.
+
+Use bullets. Include:
+
+- What appears complete and working.
+- What is in progress.
+- What was planned but not started.
+- What was committed, pushed, tested, or verified, if evidenced.
+
+## 3. Key Decisions and Constraints
+
+List decisions and constraints the next agent must respect.
+
+Include:
+
+- User preferences.
+- Technical constraints.
+- Design decisions.
+- Testing or validation expectations.
+- Anything the user explicitly rejected, deferred, or asked not to redo.
+- The reasoning behind decisions when the transcript includes it.
+
+## 4. Files and Structure
+
+List only important files, directories, scripts, configs, or generated \
+artifacts that matter for continuing.
+
+For each item include: path or filename, whether it was created/modified/\
+reviewed/generated/discussed, what role it plays, and any known status or risk.
+
+Do not list every file unless every file is truly important.
+
+## 5. Technical Context
+
+Summarize the relevant technical environment. Include when evidenced:
+
+- Tools and CLIs used.
+- Programming languages and frameworks.
+- OS or shell details.
+- Repository or branch details.
+- Package managers.
+- External services or APIs.
+- Commands that were important.
+- Non-obvious behavior discovered during the session.
+
+## 6. Errors, Failures, and Workarounds
+
+Document problems encountered and how they were handled. For each include: \
+exact error message if available, likely cause (only if evidenced or clearly \
+marked as inference), workaround or resolution, and whether the issue is \
+fully resolved or still open.
+
+## 7. What Not to Redo
+
+Direct list of work the next agent must not repeat, overwrite, regenerate, \
+or second-guess unless the user explicitly asks. Include anything already: \
+completed, committed, pushed, tested, validated, rejected, or deferred.
+
+## 8. Immediate Next Steps for the Agent
+
+Concrete continuation plan using ordered steps. Steps should be specific \
+enough that the agent can begin work immediately.
+
+Include:
+
+- What to inspect first.
+- What command to run first, if applicable.
+- What file to open first, if applicable.
+- What to verify before making changes.
+- What user intent was active at the end of the session.
+- Any caution required before editing, testing, committing, or pushing.
+
+## 9. Open Questions and Risks
+
+Separate into:
+
+- Questions that must be answered before safe continuation.
+- Risks the agent should handle cautiously.
+- Transcript gaps or ambiguities.
+
+Do not ask the user questions unless continuing would risk damaging work or \
+contradicting prior decisions.
+
+## Agent Operating Guidance
+
+Before making changes, verify the repository state with appropriate \
+read-only commands.
+
+Do not redo work marked as complete, committed, pushed, tested, validated, \
+rejected, or deferred unless the user explicitly asks.
+
+Prefer minimal, targeted changes that continue from the recovered state.
+
+If the transcript conflicts with the repository state, trust the repository \
+state for file contents and the transcript for user intent, then explain \
+the discrepancy before acting.
+
+## Style
+
+- Concise but complete.
+- Markdown headings and bullets.
+- No generic filler, motivational language, or speculation.
+- "Evidence:" notes only when needed to distinguish facts from inference.
+- "Inference:" labels for likely conclusions not directly stated.
+- Do not apologize or mention these instructions in the output.
+- Do not include any content addressed to the user.
+"""
+
+
 def render_compact_prompt(
     turns: list[Turn],
     source_name: str,
     session: SessionInfo,
+    total_turns_before_truncation: int | None = None,
 ) -> str:
     """
-    Render a prompt for asking another model to produce a compact summary.
+    Render the compaction prompt with the transcript embedded.
 
     Args:
         turns:
-            Conversation turns to summarize.
+            Conversation turns to include.
 
         source_name:
             Name of the temporary source export file.
@@ -2346,40 +2529,38 @@ def render_compact_prompt(
         session:
             Selected session metadata.
 
+        total_turns_before_truncation:
+            If the transcript was truncated, the original turn count.
+            None means no truncation occurred.
+
     Returns:
-        A Markdown prompt.
+        The fully rendered compaction prompt (user message content).
     """
 
-    transcript = render_transcript(turns, "Transcript to compact")
+    transcript = render_transcript(turns, "Recovered transcript")
+    turn_count = len(turns)
+    interaction_count = count_interactions(turns)
+    line_count = count_transcript_lines(turns)
 
-    return f"""# Prompt to generate opencode restart summary
+    if total_turns_before_truncation is not None and total_turns_before_truncation > turn_count:
+        skipped = total_turns_before_truncation - turn_count
+        truncation_note = (
+            f"Truncated to the most recent {turn_count} turns "
+            f"({skipped} older turns omitted from a session of "
+            f"{total_turns_before_truncation} total turns)."
+        )
+    else:
+        truncation_note = "Complete (no truncation applied)."
 
-You are summarizing a recovered opencode session.
-
-Source export: `{source_name}`
-Original session ID: `{session.session_id}`
-Original session title: `{session.title}`
-Original session updated: `{session.updated}`
-
-Create a concise but complete Markdown restart summary for a fresh opencode session.
-
-The summary should include:
-1. Project goal.
-2. Current status.
-3. Important decisions.
-4. Files changed or discussed.
-5. Commands run and their outcomes.
-6. Errors and unresolved issues.
-7. Known constraints and user preferences.
-8. Next recommended steps.
-9. Any cautionary notes to avoid redoing or damaging work.
-
-Keep enough detail that a coding agent can continue safely without the original full transcript.
-
-Here is the recovered transcript:
-
-{transcript}
-"""
+    return COMPACTION_USER_PROMPT_TEMPLATE.format(
+        session_id=session.session_id,
+        session_title=session.title,
+        turn_count=turn_count,
+        interaction_count=interaction_count,
+        line_count=line_count,
+        truncation_note=truncation_note,
+        transcript_content=transcript,
+    )
 
 
 def write_text(path: Path, content: str) -> None:
@@ -2494,16 +2675,16 @@ def recover_from_export(
             max_interactions = prompted_max_interactions
 
     # Apply truncation if limits are set.
+    total_turns_before_truncation = len(selected_turns)
     if max_lines is not None or max_interactions is not None:
-        original_count = len(selected_turns)
         selected_turns = apply_truncation(
             selected_turns,
             max_lines=max_lines,
             max_interactions=max_interactions,
             verbosity=verbosity,
         )
-        if len(selected_turns) < original_count:
-            skipped = original_count - len(selected_turns)
+        if len(selected_turns) < total_turns_before_truncation:
+            skipped = total_turns_before_truncation - len(selected_turns)
             print(color_yellow(
                 f"Truncated: keeping {len(selected_turns)} most recent turns "
                 f"(skipped {skipped} older turns)."
@@ -2540,6 +2721,11 @@ def recover_from_export(
             turns=selected_turns,
             source_name=export_path.name,
             session=session,
+            total_turns_before_truncation=(
+                total_turns_before_truncation
+                if total_turns_before_truncation > len(selected_turns)
+                else None
+            ),
         ),
     )
 
@@ -2686,6 +2872,12 @@ def parse_args() -> argparse.Namespace:
         "--show-models",
         action="store_true",
         help="Show available models from opencode config and exit.",
+    )
+
+    parser.add_argument(
+        "--show-compaction-prompt",
+        action="store_true",
+        help="Display the compaction prompt template and exit.",
     )
 
     parser.add_argument(
@@ -2882,8 +3074,8 @@ def run_compaction(
     except OSError as error:
         raise RecoveryError(f"Could not read compact prompt: {compact_prompt_path}\n{error}") from error
 
-    # Estimate tokens and cost.
-    input_tokens = estimate_tokens(prompt_content)
+    # Estimate tokens and cost (includes system message + full user prompt).
+    input_tokens = estimate_tokens(COMPACTION_SYSTEM_PROMPT) + estimate_tokens(prompt_content)
     # Estimate output at ~20% of input (compaction should be much shorter).
     output_tokens_est = max(500, input_tokens // 5)
 
@@ -2954,6 +3146,30 @@ def main() -> None:
             display_models(models)
         except RecoveryError as error:
             die(str(error), exit_code=1)
+        return
+
+    if args.show_compaction_prompt:
+        print(color_bold("System message:"))
+        print()
+        print(COMPACTION_SYSTEM_PROMPT)
+        print()
+        print(color_bold("User message template:"))
+        print()
+        print(COMPACTION_USER_PROMPT_TEMPLATE.replace(
+            "{transcript_content}", "[... transcript content ...]"
+        ).replace(
+            "{session_id}", "<SESSION_ID>"
+        ).replace(
+            "{session_title}", "<SESSION_TITLE>"
+        ).replace(
+            "{turn_count}", "<N>"
+        ).replace(
+            "{interaction_count}", "<N>"
+        ).replace(
+            "{line_count}", "<N>"
+        ).replace(
+            "{truncation_note}", "<truncation details or 'Complete (no truncation applied).'>"
+        ))
         return
 
     temp_dir_holder: dict[str, Path | None] = {"path": None}
@@ -3069,6 +3285,7 @@ def main() -> None:
                 pass
 
             # If --use-model is specified, run compaction via LLM.
+            compacted_path: Path | None = None
             if args.use_model:
                 compacted_path = run_compaction(
                     compact_prompt_path=generated_paths[2],  # .compact-prompt.md
@@ -3080,19 +3297,24 @@ def main() -> None:
                 if compacted_path:
                     generated_paths.append(compacted_path)
                     print()
-                    print(color_bold("Suggested next step:"))
-                    print(f"  Start a fresh opencode session and ask it to read: {color_cyan(str(compacted_path))}")
+                    print(color_bold("Next step:"))
+                    print(f"  1. Start a fresh opencode session in the same project directory.")
+                    print(f"  2. Tell the agent: read and execute {color_cyan(str(compacted_path))}")
                     print()
                 else:
-                    print()
-                    print(color_bold("Suggested next step:"))
-                    print(f"  Start a fresh opencode session and ask it to read: {color_cyan(str(generated_paths[1]))}")
-                    print()
-            else:
+                    # User cancelled compaction — fall through to non-compacted instructions.
+                    pass
+
+            # Show non-compacted instructions if no compaction was produced.
+            if not args.use_model or (args.use_model and not compacted_path):
+                restart_file = generated_paths[1]  # .restart.md
                 print()
-                print(color_bold("Suggested next step:"))
-                print(f"  Start a fresh opencode session and ask it to read: {color_cyan(str(generated_paths[1]))}")
+                print(color_bold("Next step:"))
+                print(f"  1. Start a fresh opencode session in the same project directory.")
+                print(f"  2. Tell the agent: read and execute {color_cyan(str(restart_file))}")
                 print()
+                print(color_dim("  Tip: For a more compact restart file, rerun with:"))
+                print(color_dim(f"    --use-model PROVIDER/MODEL  (see --show-models for options)"))
 
     except KeyboardInterrupt:
         eprint(color_yellow("Recovery cancelled."))
