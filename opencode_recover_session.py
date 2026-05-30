@@ -2931,12 +2931,12 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--session",
+        "-s", "--session",
         help="Known opencode session ID. Skips interactive selection.",
     )
 
     parser.add_argument(
-        "--session-dir",
+        "-d", "--session-dir",
         type=Path,
         default=None,
         help=(
@@ -2947,20 +2947,20 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--out",
+        "-o", "--out",
         type=Path,
         default=Path("opencode-recovery"),
         help="Output directory. Defaults to ./opencode-recovery.",
     )
 
     parser.add_argument(
-        "--keep-temp",
+        "-k", "--keep-temp",
         action="store_true",
         help="Keep the temporary exported JSON file for debugging.",
     )
 
     parser.add_argument(
-        "--clean",
+        "-c", "--clean",
         action="store_true",
         help="Remove leftover temporary export files from previous runs.",
     )
@@ -2972,7 +2972,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--include-tools",
+        "-t", "--include-tools",
         action="store_true",
         help="Include tool and function messages during extraction.",
     )
@@ -2984,7 +2984,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--max-lines",
+        "-L", "--max-lines",
         type=int,
         default=None,
         help=(
@@ -2995,7 +2995,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--max-interactions",
+        "-I", "--max-interactions",
         type=int,
         default=None,
         help=(
@@ -3075,7 +3075,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--use-model",
+        "-m", "--use-model",
         type=str,
         default=None,
         help=(
@@ -3087,8 +3087,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "-v",
-        "--verbose",
+        "-v", "--verbose",
         action="count",
         default=0,
         help="Increase verbosity. Use -v or -vv.",
