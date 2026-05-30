@@ -268,6 +268,49 @@ def load_opencode_config(verbosity: int = 0) -> dict[str, Any]:
     )
 
 
+_ENV_VAR_PATTERN: re.Pattern[str] = re.compile(r"\{env:([^}]+)\}")
+"""Matches opencode's {env:VAR_NAME} syntax for environment variable references."""
+
+
+def expand_env_vars(value: str) -> str:
+    """
+    Expand environment variable references in a config string value.
+
+    Supports three formats:
+      - {env:VAR_NAME}  — opencode's preferred format
+      - ${VAR_NAME}     — shell-style with braces
+      - $VAR_NAME       — shell-style without braces (only when the entire value is a reference)
+
+    Args:
+        value:
+            Config string that may contain env var references.
+
+    Returns:
+        The expanded string, or the original if no env vars found or
+        the referenced variable is not set.
+    """
+
+    if not isinstance(value, str) or not value:
+        return value
+
+    # opencode's {env:VAR_NAME} format — can appear anywhere in the string.
+    if "{env:" in value:
+        def replace_env(match: re.Match[str]) -> str:
+            var_name = match.group(1)
+            return os.environ.get(var_name, match.group(0))
+        return _ENV_VAR_PATTERN.sub(replace_env, value)
+
+    # Shell-style ${VAR_NAME} — entire value is a reference.
+    if value.startswith("${") and value.endswith("}"):
+        return os.environ.get(value[2:-1], "")
+
+    # Shell-style $VAR_NAME — entire value is a reference.
+    if value.startswith("$") and value[1:].isidentifier():
+        return os.environ.get(value[1:], "")
+
+    return value
+
+
 def extract_models_from_config(config: dict[str, Any]) -> list[ModelInfo]:
     """
     Extract all available models from the opencode config.
@@ -292,14 +335,8 @@ def extract_models_from_config(config: dict[str, Any]) -> list[ModelInfo]:
 
         options = provider_data.get("options", {})
         base_url = options.get("baseURL", "")
-        api_key = options.get("apiKey", "")
-
-        # Expand environment variable references in API key.
-        if isinstance(api_key, str):
-            if api_key.startswith("${") and api_key.endswith("}"):
-                api_key = os.environ.get(api_key[2:-1], "")
-            elif api_key.startswith("$"):
-                api_key = os.environ.get(api_key[1:], "")
+        api_key = expand_env_vars(options.get("apiKey", ""))
+        base_url = expand_env_vars(options.get("baseURL", ""))
 
         # For standard OpenAI provider, default baseURL.
         if not base_url and npm_package == "@ai-sdk/openai":
