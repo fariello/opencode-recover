@@ -133,6 +133,16 @@ class ModelInfo:
     cost_output: float | None
     compatible: bool
 
+    def __repr__(self) -> str:
+        """Mask api_key in repr to prevent accidental secret exposure in logs."""
+        key_display = f"{self.api_key[:4]}***" if self.api_key else "(empty)"
+        return (
+            f"ModelInfo(provider_id={self.provider_id!r}, model_id={self.model_id!r}, "
+            f"name={self.name!r}, base_url={self.base_url!r}, api_key={key_display!r}, "
+            f"cost_input={self.cost_input!r}, cost_output={self.cost_output!r}, "
+            f"compatible={self.compatible!r})"
+        )
+
 
 @dataclass
 class RecoveryFile:
@@ -1150,11 +1160,15 @@ def call_compaction_api(model: ModelInfo, prompt: str) -> dict[str, Any]:
     Returns dict with keys: "content", "usage" (if available).
     """
     import urllib.error
+    import urllib.parse
     import urllib.request
 
     url = model.base_url.rstrip("/") + "/chat/completions"
 
-    if not url.startswith("https://") and "localhost" not in url and "127.0.0.1" not in url:
+    # Refuse to send credentials over non-HTTPS (except localhost for dev).
+    parsed_url = urllib.parse.urlparse(url)
+    is_local = parsed_url.hostname in ("localhost", "127.0.0.1", "::1")
+    if parsed_url.scheme != "https" and not is_local:
         raise RecoveryError(
             f"Refusing to send API key to non-HTTPS endpoint: {url}\n"
             "Only HTTPS endpoints (or localhost) are supported for security."
@@ -1305,15 +1319,118 @@ and immediate next steps.
 # Restart Context for opencode
 
 ## 1. Project Summary
+
+In 2 to 4 sentences: what the session was about, what project or task was \
+being worked on, and why.
+
 ## 2. Current State
+
+Note any uncertainty caused by transcript gaps or missing tool-call details.
+
+Use bullets. Include:
+
+- What appears complete and working.
+- What is in progress.
+- What was planned but not started.
+- What was committed, pushed, tested, or verified, if evidenced.
+
 ## 3. Key Decisions and Constraints
+
+List decisions and constraints the next agent must respect.
+
+Include:
+
+- User preferences.
+- Technical constraints.
+- Design decisions.
+- Testing or validation expectations.
+- Anything the user explicitly rejected, deferred, or asked not to redo.
+- The reasoning behind decisions when the transcript includes it.
+
 ## 4. Files and Structure
+
+List only important files, directories, scripts, configs, or generated \
+artifacts that matter for continuing.
+
+For each item include: path or filename, whether it was created/modified/\
+reviewed/generated/discussed, what role it plays, and any known status or risk.
+
+Do not list every file unless every file is truly important.
+
 ## 5. Technical Context
+
+Summarize the relevant technical environment. Include when evidenced:
+
+- Tools and CLIs used.
+- Programming languages and frameworks.
+- OS or shell details.
+- Repository or branch details.
+- Package managers.
+- External services or APIs.
+- Commands that were important.
+- Non-obvious behavior discovered during the session.
+
 ## 6. Errors, Failures, and Workarounds
+
+Document problems encountered and how they were handled. For each include: \
+exact error message if available, likely cause (only if evidenced or clearly \
+marked as inference), workaround or resolution, and whether the issue is \
+fully resolved or still open.
+
 ## 7. What Not to Redo
+
+Direct list of work the next agent must not repeat, overwrite, regenerate, \
+or second-guess unless the user explicitly asks. Include anything already: \
+completed, committed, pushed, tested, validated, rejected, or deferred.
+
 ## 8. Immediate Next Steps for the Agent
+
+Concrete continuation plan using ordered steps. Steps should be specific \
+enough that the agent can begin work immediately.
+
+Include:
+
+- What to inspect first.
+- What command to run first, if applicable.
+- What file to open first, if applicable.
+- What to verify before making changes.
+- What user intent was active at the end of the session.
+- Any caution required before editing, testing, committing, or pushing.
+
 ## 9. Open Questions and Risks
+
+Separate into:
+
+- Questions that must be answered before safe continuation.
+- Risks the agent should handle cautiously.
+- Transcript gaps or ambiguities.
+
+Do not ask the user questions unless continuing would risk damaging work or \
+contradicting prior decisions.
+
 ## Agent Operating Guidance
+
+Before making changes, verify the repository state with appropriate \
+read-only commands.
+
+Do not redo work marked as complete, committed, pushed, tested, validated, \
+rejected, or deferred unless the user explicitly asks.
+
+Prefer minimal, targeted changes that continue from the recovered state.
+
+If the transcript conflicts with the repository state, trust the repository \
+state for file contents and the transcript for user intent, then explain \
+the discrepancy before acting.
+
+## Style
+
+- Concise but complete.
+- Markdown headings and bullets.
+- No generic filler, motivational language, or speculation.
+- "Evidence:" notes only when needed to distinguish facts from inference.
+- "Inference:" labels for likely conclusions not directly stated.
+- Do not apologize or mention these instructions in the output.
+- Do not include any content addressed to the user.
 """
 
 

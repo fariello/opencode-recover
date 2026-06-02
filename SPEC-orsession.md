@@ -1,14 +1,14 @@
 # orsession — Functional Specification
 
-**Version:** 0.1.0-draft
+**Version:** 0.1.0
 **Date:** 2026-06-01
-**Status:** Draft
+**Status:** Implemented (v0.1.0) — some features deferred to v0.2
 
 ---
 
 ## 1. Overview
 
-`orsession` is an interactive terminal application (curses-based TUI) for
+`orsession` is an interactive terminal application (textual-based TUI) for
 browsing, recovering, and compacting opencode sessions. It is a companion to
 `opencode_recover_session.py` (the non-interactive CLI tool), sharing the same
 core logic but providing a full drill-down, menu-driven experience.
@@ -988,14 +988,15 @@ would bring the token count below 64K and presents it as a suggestion:
 
 ```
 orsession/
-├── orsession.py          — Entry point (curses app)
-├── orsession_core.py     — Shared logic (extraction, rendering, API calls)
-├── requirements.txt      — Dependencies (if any beyond stdlib)
-└── tests/                — Test suite (future)
+├── __init__.py           — Package marker, exports __version__
+├── app.py                — Entry point (textual TUI app, all screens)
+├── core.py               — Shared logic (extraction, rendering, API calls)
+pyproject.toml            — Package metadata, dependencies, entry point
 ```
 
 The CLI tool `opencode_recover_session.py` remains standalone in the repo
-root. It does NOT depend on the `orsession` package.
+root. It optionally imports from `orsession.core` when installed, but does
+NOT depend on the package — it falls back to its own bundled implementations.
 
 ### 13.2 Internal Architecture (orsession.py)
 
@@ -1227,52 +1228,54 @@ These are noted but explicitly **not** part of the initial implementation:
 The initial release is complete when:
 
 ### Core Navigation
-- [ ] Application launches and shows session list from current directory.
-- [ ] Application launches with `--session-dir` pointing elsewhere.
-- [ ] Session list is scrollable, sortable, and filterable.
-- [ ] Timestamp toggle (`t`) cycles all three formats globally.
-- [ ] `Esc`/`b` back navigation works consistently on all screens.
-- [ ] `q` quits cleanly from any screen.
-- [ ] `?` shows context-sensitive help overlay.
-- [ ] Terminal resize doesn't crash.
-- [ ] Terminals as small as 80x24 work (degraded but functional).
+- [x] Application launches and shows session list from current directory.
+- [x] Application launches with `--session-dir` pointing elsewhere.
+- [x] Session list is scrollable and sortable.
+- [x] Timestamp toggle (`t`) cycles all three formats globally.
+- [x] `Esc`/`b` back navigation works consistently on all screens.
+- [x] `q` quits cleanly from any screen.
+- [ ] `?` shows context-sensitive help overlay. *(deferred to v0.2)*
+- [x] Terminal resize doesn't crash (handled by textual).
+- [x] Terminals as small as 80x24 work (textual responsive layout).
 
 ### Session Browsing
-- [ ] Session list shows recovery status indicators (○ ● ◗ ⑂).
-- [ ] Session Detail shows metadata and first/last exchange previews.
-- [ ] Full Preview shows scrollable transcript with in-content search.
-- [ ] Fork indicator appears for sessions created near each other.
+- [x] Session list shows recovery status indicators (○ ● ◗).
+- [x] Session Detail shows metadata and first/last exchange previews.
+- [x] Full Preview shows scrollable transcript.
+- [ ] Session list search/filter (`/` key). *(deferred to v0.2)*
+- [ ] Fork indicator `⑂` for sessions created near each other. *(deferred to v0.2)*
+- [ ] In-content search in Full Preview. *(deferred to v0.2)*
 
 ### Recovery
-- [ ] Recovery Wizard exports and generates all three file types.
-- [ ] Recovery handles truncation (interactive size configuration).
-- [ ] Quick compact shortcut (`c`) works from Session List.
-- [ ] Token/size warnings appear at appropriate thresholds.
-- [ ] Strong warning blocks proceeding without explicit override.
+- [x] Recovery Wizard exports and generates all three file types.
+- [x] Recovery handles truncation (interactive size configuration).
+- [x] Quick compact shortcut (`c`) from Session List pushes wizard.
+- [x] Token/size warnings appear at appropriate thresholds.
+- [ ] Strong warning blocks proceeding without explicit `!` override. *(deferred to v0.2)*
 
 ### Compaction
-- [ ] Model Selection shows compatible models with search/filter.
-- [ ] Model Selection shows live cost estimate as cursor moves.
-- [ ] Context Selection discovers and lists existing recovery files.
-- [ ] Context Selection allows adding custom file paths.
-- [ ] Context Selection allows recovering another session inline.
-- [ ] Compaction confirmation shows cost estimate and token warning if applicable.
-- [ ] Compaction calls API, shows progress, and writes output.
-- [ ] Save-elsewhere prompt works after compaction.
-- [ ] API errors are handled gracefully (return to model selection).
+- [x] Model Selection shows compatible models with search/filter.
+- [x] Model Selection shows estimated cost per model.
+- [x] Context Selection discovers and lists existing recovery files.
+- [ ] Context Selection allows adding custom file paths. *(deferred to v0.2)*
+- [ ] Context Selection allows recovering another session inline. *(deferred to v0.2)*
+- [x] Compaction confirmation shows cost estimate and token warning.
+- [x] Compaction calls API and writes output.
+- [ ] Save-elsewhere prompt fully functional. *(deferred to v0.2)*
+- [x] API errors are handled gracefully (return to model selection).
 
 ### File Management
-- [ ] File Browser shows existing recovery files with metadata.
-- [ ] File Browser supports viewing files in scrollable pager.
-- [ ] File Browser supports deleting individual or per-session files.
+- [x] File Browser shows existing recovery files with metadata.
+- [x] File Browser supports viewing files in scrollable pager.
+- [x] File Browser supports deleting individual or per-session files (with confirmation).
 
 ### Infrastructure
-- [ ] `opencode` not on PATH shows clear error on startup.
-- [ ] JSON-lines log file written to `~/.local/share/orsession/`.
-- [ ] Installable via `pip install .` with textual/rich as dependencies.
-- [ ] Works on Linux with Python 3.10+.
-- [ ] Works on macOS (Terminal.app + iTerm2) with Python 3.10+.
-- [ ] Windows native support (stretch goal — verify textual renders correctly).
+- [x] `opencode` not on PATH shows clear error on startup.
+- [ ] JSON-lines log file written to `~/.local/share/orsession/`. *(deferred to v0.2)*
+- [x] Installable via `pip install .` with textual/rich as dependencies.
+- [x] Works on Linux with Python 3.10+.
+- [ ] Works on macOS (Terminal.app + iTerm2) — untested, expected to work via textual.
+- [ ] Windows native support (stretch goal).
 
 ---
 

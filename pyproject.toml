@@ -7,7 +7,7 @@ name = "orsession"
 version = "0.1.0"
 description = "Interactive TUI for browsing, recovering, and compacting opencode sessions"
 readme = "README.md"
-license = "MIT"
+license = "BSD-3-Clause"
 requires-python = ">=3.10"
 authors = [
     { name = "Greg Fariello" },

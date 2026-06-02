@@ -90,6 +90,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -221,6 +222,16 @@ class ModelInfo:
     cost_input: float | None
     cost_output: float | None
     compatible: bool
+
+    def __repr__(self) -> str:
+        """Mask api_key in repr to prevent accidental secret exposure in logs."""
+        key_display = f"{self.api_key[:4]}***" if self.api_key else "(empty)"
+        return (
+            f"ModelInfo(provider_id={self.provider_id!r}, model_id={self.model_id!r}, "
+            f"name={self.name!r}, base_url={self.base_url!r}, api_key={key_display!r}, "
+            f"cost_input={self.cost_input!r}, cost_output={self.cost_output!r}, "
+            f"compatible={self.compatible!r})"
+        )
 
 
 def strip_jsonc_comments(text: str) -> str:
@@ -383,7 +394,6 @@ def extract_models_from_config(config: dict[str, Any]) -> list[ModelInfo]:
         compatible = npm_package in OPENAI_COMPATIBLE_PACKAGES
 
         options = provider_data.get("options", {})
-        base_url = options.get("baseURL", "")
         api_key = expand_env_vars(options.get("apiKey", ""))
         base_url = expand_env_vars(options.get("baseURL", ""))
 
@@ -622,7 +632,9 @@ def call_compaction_api(
     url = model.base_url.rstrip("/") + "/chat/completions"
 
     # Refuse to send credentials over non-HTTPS (except localhost for dev).
-    if not url.startswith("https://") and "localhost" not in url and "127.0.0.1" not in url:
+    parsed_url = urllib.parse.urlparse(url)
+    is_local = parsed_url.hostname in ("localhost", "127.0.0.1", "::1")
+    if parsed_url.scheme != "https" and not is_local:
         raise RecoveryError(
             f"Refusing to send API key to non-HTTPS endpoint: {url}\n"
             "Only HTTPS endpoints (or localhost) are supported for security."

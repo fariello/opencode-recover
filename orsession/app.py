@@ -9,6 +9,9 @@ from __future__ import annotations
 import argparse
 import sys
 import tempfile
+from datetime import datetime, timezone
+
+from . import __version__
 from pathlib import Path
 
 from textual.app import App, ComposeResult
@@ -1093,7 +1096,7 @@ class ContextSelectionScreen(Screen):
 
     def on_mount(self) -> None:
         self._discover_files()
-        self._render()
+        self._render_context_ui()
 
     def _discover_files(self) -> None:
         """Find available recovery files in the output directory."""
@@ -1123,7 +1126,7 @@ class ContextSelectionScreen(Screen):
                     "size_bytes": rf.size_bytes,
                 })
 
-    def _render(self) -> None:
+    def _render_context_ui(self) -> None:
         """Render the context selection UI."""
         lines: list[str] = []
 
@@ -1202,7 +1205,7 @@ class ContextSelectionScreen(Screen):
                 self.selected.discard(idx)
             else:
                 self.selected.add(idx)
-            self._render()
+            self._render_context_ui()
 
     def action_toggle_1(self) -> None: self._toggle_index(0)
     def action_toggle_2(self) -> None: self._toggle_index(1)
@@ -1230,7 +1233,7 @@ class ContextSelectionScreen(Screen):
             self.selected.clear()
         else:
             self.selected = set(range(total))
-        self._render()
+        self._render_context_ui()
 
     def action_recover_another(self) -> None:
         """Recover another session to include as context."""
@@ -1521,7 +1524,6 @@ class CompactionScreen(Screen):
             return
 
         # Save the compacted output.
-        from datetime import datetime, timezone
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
         safe_id = safe_filename(self.session.session_id)
         compacted_path = app.output_dir / f"opencode-recovery-{safe_id}-{timestamp}.compacted.md"
@@ -1674,22 +1676,47 @@ class FileBrowserScreen(Screen):
         self.app.pop_screen()
 
     def action_delete_file(self) -> None:
-        """Delete the selected file."""
+        """Delete the selected file (requires confirmation via second press)."""
         rf = self._get_selected_file()
         if not rf:
             return
-        try:
-            rf.path.unlink()
-            self.app.notify(f"Deleted: {rf.path.name}", timeout=3)
-        except OSError as e:
-            self.app.notify(f"Delete failed: {e}", severity="error", timeout=5)
-        self._refresh_files()
+        # Confirmation: first press sets pending, second press on same file confirms.
+        if getattr(self, "_pending_delete", None) == rf.path:
+            try:
+                rf.path.unlink()
+                self.app.notify(f"Deleted: {rf.path.name}", timeout=3)
+            except OSError as e:
+                self.app.notify(f"Delete failed: {e}", severity="error", timeout=5)
+            self._pending_delete = None
+            self._refresh_files()
+        else:
+            self._pending_delete = rf.path
+            self.app.notify(
+                f"Press d again to confirm deletion of: {rf.path.name}",
+                severity="warning",
+                timeout=5,
+            )
 
     def action_delete_session_files(self) -> None:
-        """Delete all files for the same session as the selected file."""
+        """Delete all files for the same session (requires confirmation via second press)."""
         rf = self._get_selected_file()
         if not rf:
             return
+        # Confirmation pattern.
+        pending_key = f"session:{rf.session_id}"
+        if getattr(self, "_pending_session_delete", None) == pending_key:
+            self._do_delete_session_files(rf)
+            self._pending_session_delete = None
+        else:
+            self._pending_session_delete = pending_key
+            self.app.notify(
+                f"Press D again to confirm deletion of ALL files for session {rf.session_id[:20]}",
+                severity="warning",
+                timeout=5,
+            )
+
+    def _do_delete_session_files(self, rf) -> None:
+        """Actually delete all files for a session."""
         target_session = rf.session_id
         deleted = 0
         for f in list(self.recovery_files):
@@ -2146,7 +2173,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--version",
         action="version",
-        version="orsession 0.1.0",
+        version=f"orsession {__version__}",
     )
 
     return parser.parse_args()

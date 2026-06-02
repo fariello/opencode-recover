@@ -52,10 +52,16 @@ No dependencies beyond Python 3.10+ and the `opencode` CLI.
 
 ## Requirements
 
-- **Python 3.10+** (uses `match` statement-era typing features like `X | None`)
-- **`opencode` CLI** on PATH
-- **No third-party Python packages** — stdlib only (`json`, `urllib`, `argparse`, etc.)
-- For `--use-model`: an OpenAI-compatible LLM provider configured in `~/.config/opencode/opencode.json`
+**CLI tool** (`opencode_recover_session.py`):
+- Python 3.10+
+- `opencode` CLI on PATH
+- No third-party packages — stdlib only
+- For `--use-model`: an OpenAI-compatible LLM provider in `~/.config/opencode/opencode.json`
+
+**TUI app** (`orsession`):
+- Python 3.10+
+- `opencode` CLI on PATH
+- `textual` and `rich` (installed automatically via `pip install .`)
 
 ---
 
@@ -77,6 +83,39 @@ chmod +x opencode_recover_session.py
 # Option 3: just copy it wherever you want
 cp opencode_recover_session.py /wherever/you/like/
 ```
+
+### Interactive TUI (orsession)
+
+For a full interactive experience with session browsing, drill-down previews,
+and guided recovery/compaction workflows, install the `orsession` TUI app:
+
+```bash
+# Install from the repo (requires Python 3.10+ and pip)
+git clone https://github.com/fariello/opencode-recover.git
+cd opencode-recover
+pip install .
+
+# Launch the TUI
+orsession
+
+# Or point it at a different project
+orsession -d /path/to/other/project
+```
+
+`orsession` uses [textual](https://textual.textualize.io/) for the terminal UI.
+It provides:
+- Sortable session list with recovery status indicators
+- Session detail with metadata, cost, tokens, and conversation previews
+- Full scrollable transcript viewer
+- Recovery wizard with truncation controls and token warnings
+- Model selection with live cost estimates and search/filter
+- Context file selection for chaining recoveries across sessions
+- LLM compaction with progress display
+- Recovery file browser with view/delete
+
+The CLI tool (`opencode_recover_session.py`) remains fully standalone with
+zero dependencies — use it when you want scripting, CI integration, or
+don't want to install packages.
 
 ---
 
