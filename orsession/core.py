@@ -1064,7 +1064,7 @@ The goal is not merely to summarize the transcript. The goal is to resume the in
 5. Before editing, run safe read-only checks to verify the repository state.
 6. If the repository state conflicts with the transcript, trust the repository for actual file contents and the transcript for user intent. Explain the discrepancy before acting.
 7. Continue with minimal, targeted changes that move the active task forward.
-8. Ask the user for clarification only if proceeding would risk damaging work, losing data, violating a prior decision, or triggering an external side effect.
+8. If proceeding would risk damaging work, losing data, violating a prior decision, or triggering an external side effect, identify the blocker and avoid the risky action until it is resolved.
 
 ## What to recover from the transcript
 
@@ -1106,7 +1106,7 @@ Include:
 3. What read-only command or file check you will run first, if applicable.
 4. Any uncertainty or risk that affects safe continuation.
 
-Ask questions only if continuing would create meaningful risk.
+If continuing would create meaningful risk, identify the blocker before taking action.
 
 {transcript}
 """
@@ -1416,7 +1416,7 @@ In 2 to 4 sentences: what project was being worked on, what task the session foc
 
 ## 3. Active User Intent at Interruption
 
-The immediate task, expected outcome, stated urgency or constraints, and whether to continue implementation, inspect, debug, test, document, commit, or ask before proceeding. Label uncertainty clearly.
+The immediate task, expected outcome, stated urgency or constraints, and whether to continue implementation, inspect state, debug, test, document, commit, or pause before proceeding. Label uncertainty clearly.
 
 ## 4. Current State
 
@@ -1476,7 +1476,7 @@ High-confidence facts, medium-confidence inferences, low-confidence or missing a
 6. Continue with minimal, targeted changes.
 7. Do not redo completed/committed/tested/rejected/deferred work.
 8. Do not run destructive commands without user authorization.
-9. Ask the user only if proceeding risks damage, data loss, or contradicting prior decisions.
+9. If proceeding would risk damaging work, losing data, triggering external side effects, or contradicting prior decisions, identify the blocker and avoid the risky action until it is resolved.
 
 ## Style Requirements for This Document
 
