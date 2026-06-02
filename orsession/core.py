@@ -407,8 +407,9 @@ def run_command(
     command: Sequence[str],
     check: bool = True,
     cwd: Path | None = None,
+    timeout: int = 60,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a subprocess command safely."""
+    """Run a subprocess command safely with a timeout."""
     try:
         completed = subprocess.run(
             list(command),
@@ -417,6 +418,11 @@ def run_command(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=cwd,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        raise RecoveryError(
+            f"Command timed out after {timeout}s: {' '.join(command)}"
         )
     except FileNotFoundError as error:
         raise RecoveryError(f"Command not found: {command[0]}") from error
@@ -452,7 +458,16 @@ def list_sessions(cwd: Path | None = None) -> list[SessionInfo]:
     return sessions
 
 
-def export_session(session_id: str, temp_dir: Path, cwd: Path | None = None) -> SessionExport:
+EXPORT_TIMEOUT_SECONDS: int = 120
+"""Maximum time to wait for opencode export before giving up."""
+
+
+def export_session(
+    session_id: str,
+    temp_dir: Path,
+    cwd: Path | None = None,
+    timeout: int = EXPORT_TIMEOUT_SECONDS,
+) -> SessionExport:
     """Export a session and parse its contents."""
     export_path = temp_dir / f"opencode-session-{session_id}.json"
 
@@ -467,7 +482,15 @@ def export_session(session_id: str, temp_dir: Path, cwd: Path | None = None) -> 
                 text=True,
                 check=False,
                 cwd=cwd,
+                timeout=timeout,
             )
+    except subprocess.TimeoutExpired:
+        raise RecoveryError(
+            f"Export timed out after {timeout} seconds for session {session_id}.\n"
+            "The session may be corrupted or extremely large. Try running\n"
+            f"  opencode export {session_id}\n"
+            "manually to diagnose the issue."
+        )
     except FileNotFoundError as error:
         raise RecoveryError("Command not found: opencode") from error
     except OSError as error:
