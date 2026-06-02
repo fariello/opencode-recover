@@ -2460,7 +2460,7 @@ The goal is not merely to summarize the transcript. The goal is to resume the in
 5. Before editing, run safe read-only checks to verify the repository state.
 6. If the repository state conflicts with the transcript, trust the repository for actual file contents and the transcript for user intent. Explain the discrepancy before acting.
 7. Continue with minimal, targeted changes that move the active task forward.
-8. If proceeding would risk damaging work, losing data, violating a prior decision, or triggering an external side effect, identify the blocker and avoid the risky action until it is resolved.
+8. If proceeding with a specific action would risk damaging work, losing data, violating a prior decision, or triggering an external side effect, note the risk clearly in your response and proceed with maximum caution on the safest available path forward.
 
 ## What to recover from the transcript
 
@@ -2502,7 +2502,7 @@ Include:
 3. What read-only command or file check you will run first, if applicable.
 4. Any uncertainty or risk that affects safe continuation.
 
-If continuing would create meaningful risk, identify the blocker before taking action.
+If you identify meaningful risks, note them clearly in your continuation plan and proceed on the safest path available.
 
 {transcript}
 """
@@ -2578,7 +2578,8 @@ The document should preserve the working context that would normally be availabl
 14. Do not include instructions for the user.
 15. Do not include a suggested message for the user to paste.
 16. Write the output as context and instructions for the future opencode agent only.
-17. The final document must be useful when the user tells the next agent: `read and execute this file`.
+17. Always produce the complete restart document regardless of transcript quality, gaps, or perceived risk. Never refuse to generate output or stop mid-document.
+18. The final document must be useful when the user tells the next agent: `read and execute this file`.
 
 ## Compaction Priorities
 
@@ -2696,7 +2697,7 @@ High-confidence facts, medium-confidence inferences, low-confidence or missing a
 6. Continue with minimal, targeted changes.
 7. Do not redo completed/committed/tested/rejected/deferred work.
 8. Do not run destructive commands without user authorization.
-9. If proceeding would risk damaging work, losing data, triggering external side effects, or contradicting prior decisions, identify the blocker and avoid the risky action until it is resolved.
+9. If the transcript reveals that continuation could damage work, lose data, trigger irreversible external effects, or fundamentally contradict prior decisions, include `<!-- COMPACTION_MAJOR_ISSUE: brief description -->` at the relevant location in the document and continue producing all remaining sections normally.
 
 ## Style Requirements for This Document
 
@@ -3488,6 +3489,17 @@ def run_compaction(
     print()
     print(f"  Compacted output: {color_green(str(compacted_path))}")
     print(f"  Output lines:     {response_text.count(chr(10)) + 1}")
+
+    # Check for major issues flagged by the compaction model.
+    major_issue_lines = [
+        line for line in response_text.splitlines()
+        if "COMPACTION_MAJOR_ISSUE" in line
+    ]
+    if major_issue_lines:
+        print()
+        print(color_yellow("Warning: compaction reported major issue(s):"))
+        for line in major_issue_lines:
+            print(f"  {color_yellow(line)}")
 
     return compacted_path
 

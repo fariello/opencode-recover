@@ -1443,12 +1443,26 @@ class CompactionScreen(Screen):
                 lines.append(f"  [dim]Actual cost:[/]   [bold]${actual_cost:.4f}[/]")
 
         if self.compacted_path and self.compacted_path.exists():
-            line_count = self.compacted_path.read_text().count("\n") + 1
+            compacted_text = self.compacted_path.read_text()
+            line_count = compacted_text.count("\n") + 1
             size = self.compacted_path.stat().st_size
             lines.append("")
             lines.append(f"  [green]Saved to:[/]")
             lines.append(f"    {self.compacted_path}")
             lines.append(f"    [dim]{line_count} lines, {_format_number(size)} bytes[/]")
+
+            # Check for major issues flagged by the compaction model.
+            major_issue_lines = [
+                line for line in compacted_text.splitlines()
+                if "COMPACTION_MAJOR_ISSUE" in line
+            ]
+            if major_issue_lines:
+                lines.append("")
+                lines.append("  [bold yellow]Warning: compaction reported major issue(s):[/]")
+                for issue_line in major_issue_lines:
+                    # Strip HTML comment markers for display.
+                    display = issue_line.replace("<!--", "").replace("-->", "").strip()
+                    lines.append(f"    [yellow]{display}[/]")
 
         lines.append("")
         lines.append("─" * 40)
