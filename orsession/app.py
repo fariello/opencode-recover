@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from . import __version__
 from pathlib import Path
 
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
@@ -96,30 +97,38 @@ class SessionDetailScreen(Screen):
 
     def on_mount(self) -> None:
         """Export and parse the session on mount."""
-        self._load_export()
+        self._load_export_async()
 
-    def _load_export(self) -> None:
-        """Export the session and extract turns."""
+    @work(thread=True)
+    def _load_export_async(self) -> None:
+        """Export the session in a background thread."""
         app: OrsessionApp = self.app  # type: ignore
-        content_widget = self.query_one("#detail-content", Static)
 
         try:
-            # Use the app's shared temp dir.
-            self.export = export_session(
+            export = export_session(
                 session_id=self.session.session_id,
                 temp_dir=app.temp_dir,
                 cwd=app.session_dir,
             )
-            self.turns = filter_conversation_turns(
-                extract_turns_from_export(self.export, include_tools=False)
+            turns = filter_conversation_turns(
+                extract_turns_from_export(export, include_tools=False)
             )
         except RecoveryError as e:
-            content_widget.update(
-                f"[bold red]Export failed:[/]\n\n{e}",
-            )
-            self.loading = False
+            self.app.call_from_thread(self._on_export_error, str(e))
             return
 
+        self.app.call_from_thread(self._on_export_complete, export, turns)
+
+    def _on_export_error(self, error_message: str) -> None:
+        """Handle export failure (called on main thread)."""
+        content_widget = self.query_one("#detail-content", Static)
+        content_widget.update(f"[bold red]Export failed:[/]\n\n{error_message}")
+        self.loading = False
+
+    def _on_export_complete(self, export: SessionExport, turns: list[Turn]) -> None:
+        """Handle successful export (called on main thread)."""
+        self.export = export
+        self.turns = turns
         self.loading = False
         self._render_detail()
 
@@ -668,14 +677,18 @@ class RecoveryWizardScreen(Screen):
     # ------------------------------------------------------------------
 
     def _run_recovery_pipeline(self) -> None:
-        """Export session, extract turns, apply truncation, generate recovery files."""
+        """Kick off the recovery pipeline in a background thread."""
+        self.step = "exporting"
+        self._render_step()
+        self._run_recovery_pipeline_async()
+
+    @work(thread=True)
+    def _run_recovery_pipeline_async(self) -> None:
+        """Export session, extract turns, apply truncation, generate recovery files (background)."""
         app: OrsessionApp = self.app  # type: ignore
 
         # Step: Export (if not already done).
         if not self.export:
-            self.step = "exporting"
-            self._render_step()
-            # Run export (blocking in this simple implementation).
             try:
                 self.export = export_session(
                     session_id=self.session.session_id,
@@ -683,43 +696,24 @@ class RecoveryWizardScreen(Screen):
                     cwd=app.session_dir,
                 )
             except RecoveryError as e:
-                self.app.notify(f"Export failed: {e}", severity="error", timeout=8)
-                self.step = "configure"
-                self._render_step()
+                self.app.call_from_thread(self._on_pipeline_error, f"Export failed: {e}")
                 return
 
         # Extract turns.
-        self.turns = filter_conversation_turns(
+        turns = filter_conversation_turns(
             extract_turns_from_export(self.export, include_tools=self.include_tools)
         )
 
-        if not self.turns:
-            self.app.notify("No user/assistant turns found in export.", severity="error")
-            self.step = "configure"
-            self._render_step()
+        if not turns:
+            self.app.call_from_thread(self._on_pipeline_error, "No user/assistant turns found in export.")
             return
 
         # Apply truncation.
-        total_before = len(self.turns)
+        total_before = len(turns)
         if self.max_interactions:
-            self.turns = truncate_turns_by_interactions(self.turns, self.max_interactions)
+            turns = truncate_turns_by_interactions(turns, self.max_interactions)
         if self.max_lines:
-            self.turns = truncate_turns_by_lines(self.turns, self.max_lines)
-
-        if len(self.turns) < total_before:
-            skipped = total_before - len(self.turns)
-            self.app.notify(
-                f"Truncated: keeping {len(self.turns)} of {total_before} turns ({skipped} omitted)",
-                timeout=5,
-            )
-
-        # Step: Generate.
-        self.step = "generating"
-        self._render_step()
-
-        # Clean previous if requested.
-        if self.clean_previous:
-            self._clean_previous_files(app)
+            turns = truncate_turns_by_lines(turns, self.max_lines)
 
         # Generate files.
         try:
@@ -728,25 +722,51 @@ class RecoveryWizardScreen(Screen):
                 if self.export.export_path
                 else f"opencode-session-{self.session.session_id}.json"
             )
-            self.generated_files = generate_recovery_files(
-                turns=self.turns,
+            generated_files = generate_recovery_files(
+                turns=turns,
                 session=self.session,
                 output_dir=app.output_dir,
                 export_name=export_name,
                 total_turns_before_truncation=(
-                    total_before if total_before > len(self.turns) else None
+                    total_before if total_before > len(turns) else None
                 ),
             )
         except RecoveryError as e:
-            self.app.notify(f"Generation failed: {e}", severity="error", timeout=8)
-            self.step = "configure"
-            self._render_step()
+            self.app.call_from_thread(self._on_pipeline_error, f"Generation failed: {e}")
             return
+
+        self.app.call_from_thread(
+            self._on_pipeline_complete, turns, total_before, generated_files
+        )
+
+    def _on_pipeline_error(self, message: str) -> None:
+        """Handle pipeline failure (main thread)."""
+        self.app.notify(message, severity="error", timeout=8)
+        self.step = "configure"
+        self._render_step()
+
+    def _on_pipeline_complete(
+        self, turns: list[Turn], total_before: int, generated_files: dict
+    ) -> None:
+        """Handle pipeline success (main thread)."""
+        app: OrsessionApp = self.app  # type: ignore
+        self.turns = turns
+        self.generated_files = generated_files
+
+        if len(turns) < total_before:
+            skipped = total_before - len(turns)
+            self.app.notify(
+                f"Truncated: keeping {len(turns)} of {total_before} turns ({skipped} omitted)",
+                timeout=5,
+            )
+
+        # Clean previous if requested.
+        if self.clean_previous:
+            self._clean_previous_files(app)
 
         # Refresh recovery file cache.
         app.recovery_files = discover_recovery_files(app.output_dir)
 
-        # Step: Complete.
         self.step = "complete"
         self._render_step()
 
@@ -1515,13 +1535,17 @@ class CompactionScreen(Screen):
                 self._render_step()
 
     def _run_compaction(self) -> None:
-        """Execute the API call."""
-        app: OrsessionApp = self.app  # type: ignore
+        """Kick off the API call in a background thread."""
         self.step = "running"
         self._render_step()
+        self._run_compaction_async()
 
-        # Build the prompt. If prior context was provided, regenerate the prompt
-        # with context included (the file on disk won't have it).
+    @work(thread=True)
+    def _run_compaction_async(self) -> None:
+        """Execute the API call in a background thread."""
+        app: OrsessionApp = self.app  # type: ignore
+
+        # Build the prompt.
         if self.prior_context:
             prompt_content = render_compact_prompt(
                 self.turns, self.session, prior_context=self.prior_context,
@@ -1536,9 +1560,7 @@ class CompactionScreen(Screen):
         try:
             result = call_compaction_api(self.model, prompt_content)
         except RecoveryError as e:
-            self.error_text = str(e)
-            self.step = "error"
-            self._render_step()
+            self.app.call_from_thread(self._on_compaction_error, str(e))
             return
 
         # Save the compacted output.
@@ -1549,17 +1571,25 @@ class CompactionScreen(Screen):
         try:
             write_text(compacted_path, result["content"])
         except RecoveryError as e:
-            self.error_text = f"Failed to save output: {e}"
-            self.step = "error"
-            self._render_step()
+            self.app.call_from_thread(self._on_compaction_error, f"Failed to save output: {e}")
             return
 
+        self.app.call_from_thread(
+            self._on_compaction_complete, compacted_path, result.get("usage", {})
+        )
+
+    def _on_compaction_error(self, error_message: str) -> None:
+        """Handle API call failure (main thread)."""
+        self.error_text = error_message
+        self.step = "error"
+        self._render_step()
+
+    def _on_compaction_complete(self, compacted_path: Path, usage: dict) -> None:
+        """Handle successful compaction (main thread)."""
+        app: OrsessionApp = self.app  # type: ignore
         self.compacted_path = compacted_path
-        self.actual_usage = result.get("usage", {})
-
-        # Refresh recovery file cache.
+        self.actual_usage = usage
         app.recovery_files = discover_recovery_files(app.output_dir)
-
         self.step = "complete"
         self._render_step()
 
