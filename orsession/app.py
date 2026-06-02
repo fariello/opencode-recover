@@ -612,7 +612,7 @@ class RecoveryWizardScreen(Screen):
 
         if self.step == "configure":
             if key in ("p", "P"):
-                self._do_proceed()
+                self._run_recovery_pipeline()
             elif key == "i":
                 self.include_tools = not self.include_tools
                 # Re-extract turns if we have an export.
@@ -664,8 +664,8 @@ class RecoveryWizardScreen(Screen):
     # Recovery Logic
     # ------------------------------------------------------------------
 
-    def _do_proceed(self) -> None:
-        """Run the export + generate pipeline."""
+    def _run_recovery_pipeline(self) -> None:
+        """Export session, extract turns, apply truncation, generate recovery files."""
         app: OrsessionApp = self.app  # type: ignore
 
         # Step: Export (if not already done).
@@ -1216,12 +1216,12 @@ class ContextSelectionScreen(Screen):
 
     def action_proceed(self) -> None:
         """Proceed to compaction with selected context."""
-        self._do_proceed()
+        self._push_compaction_with_context()
 
     def action_skip(self) -> None:
         """Skip context selection — proceed without prior context."""
         self.selected.clear()
-        self._do_proceed()
+        self._push_compaction_with_context()
 
     def action_toggle_all(self) -> None:
         """Toggle all files selected/deselected."""
@@ -1240,8 +1240,8 @@ class ContextSelectionScreen(Screen):
             timeout=6,
         )
 
-    def _do_proceed(self) -> None:
-        """Gather selected files and push CompactionScreen with context."""
+    def _push_compaction_with_context(self) -> None:
+        """Gather selected files, build context string, and push CompactionScreen."""
         # Build the prior context string from selected files.
         prior_context = self._build_prior_context()
 
@@ -1567,6 +1567,163 @@ class CompactionScreen(Screen):
 
 
 # ---------------------------------------------------------------------------
+# File Browser Screen
+# ---------------------------------------------------------------------------
+
+class FileBrowserScreen(Screen):
+    """Browse, view, and delete existing recovery files."""
+
+    BINDINGS = [
+        Binding("escape", "go_back", "Back", priority=True),
+        Binding("b", "go_back", "Back", priority=True),
+        Binding("d", "delete_file", "Delete", priority=True),
+        Binding("D", "delete_session_files", "Delete Session", priority=True),
+        Binding("q", "quit", "Quit"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Container(
+            Static(id="filebrowser-header"),
+            DataTable(id="filebrowser-table"),
+            Static(id="filebrowser-footer"),
+            id="filebrowser-container",
+        )
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self._refresh_files()
+
+    def _refresh_files(self) -> None:
+        """Scan output directory and populate the table."""
+        app: OrsessionApp = self.app  # type: ignore
+        self.recovery_files = discover_recovery_files(app.output_dir)
+
+        header = self.query_one("#filebrowser-header", Static)
+        if self.recovery_files:
+            header.update(
+                f"[bold]Recovery files in[/] [cyan]{app.output_dir}[/] "
+                f"({len(self.recovery_files)} files)"
+            )
+        else:
+            header.update(
+                f"[bold]Recovery files in[/] [cyan]{app.output_dir}[/]\n\n"
+                f"[dim]No recovery files found.[/]"
+            )
+
+        self._populate_table()
+        self._render_footer()
+
+    def _populate_table(self) -> None:
+        """Fill the file browser table."""
+        try:
+            table = self.query_one("#filebrowser-table", DataTable)
+        except Exception:
+            return
+
+        table.clear(columns=True)
+        table.cursor_type = "row"
+        table.zebra_stripes = True
+
+        table.add_column("#", width=4)
+        table.add_column("Type", width=14)
+        table.add_column("Session", width=30)
+        table.add_column("Timestamp", width=18)
+        table.add_column("Lines", width=7)
+        table.add_column("Size", width=10)
+
+        for idx, rf in enumerate(self.recovery_files, start=1):
+            size_str = _format_number(rf.size_bytes)
+            table.add_row(
+                str(idx),
+                rf.file_type,
+                rf.session_id[:28],
+                rf.timestamp,
+                str(rf.line_count),
+                size_str,
+                key=str(rf.path),
+            )
+
+    def _render_footer(self) -> None:
+        """Render the footer with action hints."""
+        footer = self.query_one("#filebrowser-footer", Static)
+        if self.recovery_files:
+            footer.update(
+                "\n  [dim]Enter: View file  d: Delete file  "
+                "D: Delete all for session  b: Back[/]"
+            )
+        else:
+            footer.update("\n  [dim]b: Back[/]")
+
+    def _get_selected_file(self):
+        """Get the currently selected recovery file."""
+        try:
+            table = self.query_one("#filebrowser-table", DataTable)
+            row_idx = table.cursor_row
+            if row_idx is not None and 0 <= row_idx < len(self.recovery_files):
+                return self.recovery_files[row_idx]
+        except Exception:
+            pass
+        return None
+
+    # ------------------------------------------------------------------
+    # Actions
+    # ------------------------------------------------------------------
+
+    def action_go_back(self) -> None:
+        self.app.pop_screen()
+
+    def action_delete_file(self) -> None:
+        """Delete the selected file."""
+        rf = self._get_selected_file()
+        if not rf:
+            return
+        try:
+            rf.path.unlink()
+            self.app.notify(f"Deleted: {rf.path.name}", timeout=3)
+        except OSError as e:
+            self.app.notify(f"Delete failed: {e}", severity="error", timeout=5)
+        self._refresh_files()
+
+    def action_delete_session_files(self) -> None:
+        """Delete all files for the same session as the selected file."""
+        rf = self._get_selected_file()
+        if not rf:
+            return
+        target_session = rf.session_id
+        deleted = 0
+        for f in list(self.recovery_files):
+            if f.session_id == target_session:
+                try:
+                    f.path.unlink()
+                    deleted += 1
+                except OSError:
+                    pass
+        self.app.notify(f"Deleted {deleted} file(s) for session {target_session[:20]}", timeout=4)
+        self._refresh_files()
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """View the selected file in a pager."""
+        rf = self._get_selected_file()
+        if not rf:
+            return
+        try:
+            content = rf.path.read_text(encoding="utf-8")
+        except OSError as e:
+            self.app.notify(f"Could not read file: {e}", severity="error")
+            return
+
+        # Create a simple turn to display in the preview screen.
+        view_turn = Turn(role="assistant", text=content, index=1, source="file")
+        session_stub = SessionInfo(
+            session_id=rf.session_id,
+            title=f"{rf.file_type}: {rf.path.name}",
+            created="", updated="", raw={},
+        )
+        self.app.push_screen(FullPreviewScreen(session_stub, [view_turn]))
+
+
+# ---------------------------------------------------------------------------
 # Session List Screen (default)
 # ---------------------------------------------------------------------------
 
@@ -1735,7 +1892,7 @@ class SessionListScreen(Screen):
         self._update_status("Search (not yet implemented)")
 
     def action_browse_files(self) -> None:
-        self._update_status("File browser (not yet implemented)")
+        self.app.push_screen(FileBrowserScreen())
 
     def action_help(self) -> None:
         self._update_status("Help (not yet implemented)")
@@ -1882,6 +2039,24 @@ class OrsessionApp(App):
 
     #context-content {
         width: 100%;
+    }
+
+    #filebrowser-container {
+        height: 1fr;
+        padding: 1 2;
+    }
+
+    #filebrowser-header {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    #filebrowser-table {
+        height: 1fr;
+    }
+
+    #filebrowser-footer {
+        height: auto;
     }
 
     #compact-scroll {
