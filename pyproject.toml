@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "orsession"
+version = "0.1.0"
+description = "Interactive TUI for browsing, recovering, and compacting opencode sessions"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Greg Fariello" },
+]
+dependencies = [
+    "textual>=3.0.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.scripts]
+orsession = "orsession.app:main"
