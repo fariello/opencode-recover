@@ -96,6 +96,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+# When orsession is installed alongside this script, prefer its shared core
+# for functions that have been improved (e.g., config expansion with {file:}
+# support). Falls back gracefully to the bundled implementations below.
+_USE_ORSESSION_CORE: bool = False
+_core_expand_env_vars: Any = None
+try:
+    from orsession.core import expand_config_refs as _imported_expand
+    _core_expand_env_vars = _imported_expand
+    _USE_ORSESSION_CORE = True
+except ImportError:
+    pass
+
 
 # ---------------------------------------------------------------------------
 # ANSI color helpers
@@ -314,6 +326,10 @@ def expand_env_vars(value: str) -> str:
         The expanded string, or the original if no references found or
         the referenced variable/file is not available.
     """
+
+    # Delegate to orsession.core if available (keeps implementations in sync).
+    if _USE_ORSESSION_CORE:
+        return _core_expand_env_vars(value)
 
     if not isinstance(value, str) or not value:
         return value
