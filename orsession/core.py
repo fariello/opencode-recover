@@ -1296,10 +1296,40 @@ def call_compaction_api(model: ModelInfo, prompt: str) -> dict[str, Any]:
 # File I/O
 # ---------------------------------------------------------------------------
 
+def _backup_if_exists(path: Path) -> Path | None:
+    """
+    If path exists, rename it to a numbered .NN.bak backup.
+
+    The backup name is the original filename with .NN.bak appended
+    (e.g., foo.compacted.md → foo.compacted.md.01.bak).
+
+    Returns the backup path, or None if no backup was needed.
+    """
+    if not path.exists():
+        return None
+
+    for n in range(1, 100):
+        backup_path = path.parent / f"{path.name}.{n:02d}.bak"
+        if not backup_path.exists():
+            try:
+                path.rename(backup_path)
+            except OSError:
+                import shutil
+                try:
+                    shutil.copy2(path, backup_path)
+                    path.unlink()
+                except OSError:
+                    return None
+            return backup_path
+
+    return None
+
+
 def write_text(path: Path, content: str) -> None:
-    """Write text content to a UTF-8 file."""
+    """Write text content to a UTF-8 file, backing up any existing file first."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        _backup_if_exists(path)
         path.write_text(content, encoding="utf-8")
     except OSError as error:
         raise RecoveryError(f"Could not write file: {path}\n{error}") from error

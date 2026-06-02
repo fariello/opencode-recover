@@ -2859,9 +2859,50 @@ def render_compact_prompt(
     )
 
 
+def _backup_if_exists(path: Path) -> Path | None:
+    """
+    If path exists, rename it to a numbered .NN.bak backup.
+
+    Finds the next available backup number (01, 02, ...) and renames
+    the existing file. Returns the backup path, or None if no backup
+    was needed.
+
+    Args:
+        path:
+            File path to check.
+
+    Returns:
+        The backup path used, or None if the file did not exist.
+    """
+
+    if not path.exists():
+        return None
+
+    for n in range(1, 100):
+        backup_path = path.parent / f"{path.name}.{n:02d}.bak"
+        if not backup_path.exists():
+            try:
+                path.rename(backup_path)
+            except OSError:
+                # If rename fails, try copy + delete as fallback.
+                import shutil
+                try:
+                    shutil.copy2(path, backup_path)
+                    path.unlink()
+                except OSError:
+                    return None
+            return backup_path
+
+    # 99 backups exhausted — overwrite without backup.
+    return None
+
+
 def write_text(path: Path, content: str) -> None:
     """
-    Write text content to a UTF-8 file.
+    Write text content to a UTF-8 file, backing up any existing file first.
+
+    If the destination file already exists, it is renamed to a numbered
+    backup (.01.bak, .02.bak, etc.) before writing.
 
     Args:
         path:
@@ -2877,11 +2918,10 @@ def write_text(path: Path, content: str) -> None:
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        _backup_if_exists(path)
         path.write_text(content, encoding="utf-8")
     except OSError as error:
         raise RecoveryError(f"Could not write file: {path}\n{error}") from error
-
-    pass
 
 
 def recover_from_export(
