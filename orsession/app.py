@@ -288,10 +288,8 @@ class SessionDetailScreen(Screen):
         """Build the scrollable exchanges list."""
         ts_mode = self._get_ts_mode()
         term_width = self._get_term_width()
-        # Prefix width depends on timestamp mode:
-        # "  U HH:MM: " = 11, "  U Mon-DD HH:MM: " = 20, "  U YYYY-MM-DD HH:MM:SS: " = 28
-        ts_overhead = {"short": 11, "medium": 20, "long": 28}.get(ts_mode, 20)
-        preview_width = max(40, term_width - ts_overhead)
+        # Account for VerticalScroll padding (2 left + 2 right) and scrollbar (2).
+        usable_width = term_width - 6
 
         if not self.turns:
             return "  [dim]No exchanges found.[/]"
@@ -302,14 +300,26 @@ class SessionDetailScreen(Screen):
 
         for turn in self.turns:
             ts = self._get_turn_timestamp(turn)
-            ts_display = f" {rich_escape(format_timestamp(ts, ts_mode))}" if ts else ""
+            ts_formatted = format_timestamp(ts, ts_mode) if ts else ""
+            ts_display = f" {rich_escape(ts_formatted)}" if ts_formatted else ""
             role_char = "U" if turn.role == "user" else "A"
             role_style = "cyan" if turn.role == "user" else "dim"
-            preview_text = _collapse_preview(turn.text, preview_width)
 
-            # Highlight search matches in bold red.
-            if search_lower and search_lower in preview_text.lower():
-                # Split on matches, escape each part, wrap matches in markup.
+            # Calculate preview width per line based on actual prefix length.
+            # Prefix: "  " + role_char + ts_display + ": " = 2 + 1 + len(ts_formatted) + 1 + 2
+            prefix_len = 2 + 1 + (len(ts_formatted) + 1 if ts_formatted else 0) + 2
+            preview_width = max(20, usable_width - prefix_len)
+
+            # Collapse text to single line.
+            collapsed = " ".join(turn.text.split())
+
+            # Truncation: if searching, center on first match.
+            if search_lower and search_lower in collapsed.lower():
+                match_pos = collapsed.lower().find(search_lower)
+                preview_text = self._truncate_around_match(
+                    collapsed, match_pos, len(self.search_term), preview_width
+                )
+                # Highlight: split on matches, escape each part, wrap in markup.
                 parts: list[str] = []
                 pattern = re.compile(f"({re.escape(self.search_term)})", re.IGNORECASE)
                 for segment in pattern.split(preview_text):
@@ -319,11 +329,41 @@ class SessionDetailScreen(Screen):
                         parts.append(rich_escape(segment))
                 preview = "".join(parts)
             else:
+                # Normal truncation from start.
+                if len(collapsed) <= preview_width:
+                    preview_text = collapsed
+                else:
+                    preview_text = collapsed[:preview_width - 3] + "..."
                 preview = rich_escape(preview_text)
 
             lines.append(f"  [{role_style}]{role_char}{ts_display}:[/] {preview}")
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _truncate_around_match(text: str, match_pos: int, match_len: int, max_width: int) -> str:
+        """Truncate text to max_width, centered around a match position."""
+        if len(text) <= max_width:
+            return text
+
+        # We want the match roughly in the middle of the visible area.
+        half = (max_width - match_len) // 2
+        start = max(0, match_pos - half)
+        end = start + max_width
+
+        if end > len(text):
+            end = len(text)
+            start = max(0, end - max_width)
+
+        result = text[start:end]
+
+        # Add ellipsis indicators.
+        if start > 0:
+            result = "..." + result[3:]
+        if end < len(text):
+            result = result[:-3] + "..."
+
+        return result
 
     def _get_turn_timestamp(self, turn: Turn) -> str:
         """Try to find the timestamp for a turn from the export messages."""
