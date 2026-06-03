@@ -311,7 +311,11 @@ class SessionDetailScreen(Screen):
             lines.append("")
 
         content_widget = self.query_one("#detail-content", Static)
-        content_widget.update("\n".join(lines))
+        rendered = "\n".join(lines)
+        # Safeguard: if content is unreasonably large, truncate it.
+        if len(rendered) > 10000:
+            rendered = rendered[:10000] + "\n\n[dim]... (display truncated)[/]"
+        content_widget.update(rendered)
 
     def _get_turn_timestamp(self, turn: Turn) -> str:
         """Try to find the timestamp for a turn from the export messages."""
