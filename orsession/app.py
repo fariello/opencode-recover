@@ -383,8 +383,10 @@ class SessionDetailScreen(Screen):
 
     def _centered_separator(self, label: str, width: int) -> str:
         """Build a centered label with horizontal line fill (no markup in label)."""
+        # Account for VerticalScroll padding (2 left + 2 right) and scrollbar (2).
+        usable = width - 6
         label_len = len(label)
-        remaining = max(0, width - label_len)
+        remaining = max(0, usable - label_len)
         left = max(2, remaining // 2)
         right = max(2, remaining - left)
         return f"{'─' * left}[bold]{rich_escape(label)}[/]{'─' * right}"
