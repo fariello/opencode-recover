@@ -288,7 +288,10 @@ class SessionDetailScreen(Screen):
         """Build the scrollable exchanges list."""
         ts_mode = self._get_ts_mode()
         term_width = self._get_term_width()
-        preview_width = max(40, term_width - 26)
+        # Prefix width depends on timestamp mode:
+        # "  U HH:MM: " = 11, "  U Mon-DD HH:MM: " = 20, "  U YYYY-MM-DD HH:MM:SS: " = 28
+        ts_overhead = {"short": 11, "medium": 20, "long": 28}.get(ts_mode, 20)
+        preview_width = max(40, term_width - ts_overhead)
 
         if not self.turns:
             return "  [dim]No exchanges found.[/]"
@@ -306,12 +309,15 @@ class SessionDetailScreen(Screen):
 
             # Highlight search matches in bold red.
             if search_lower and search_lower in preview_text.lower():
-                escaped = rich_escape(preview_text)
-                pattern = re.compile(re.escape(rich_escape(self.search_term)), re.IGNORECASE)
-                escaped = pattern.sub(
-                    lambda m: f"[bold red]{m.group(0)}[/bold red]", escaped
-                )
-                preview = escaped
+                # Split on matches, escape each part, wrap matches in markup.
+                parts: list[str] = []
+                pattern = re.compile(f"({re.escape(self.search_term)})", re.IGNORECASE)
+                for segment in pattern.split(preview_text):
+                    if segment.lower() == search_lower:
+                        parts.append(f"[bold red]{rich_escape(segment)}[/bold red]")
+                    else:
+                        parts.append(rich_escape(segment))
+                preview = "".join(parts)
             else:
                 preview = rich_escape(preview_text)
 
@@ -341,20 +347,28 @@ class SessionDetailScreen(Screen):
     # ------------------------------------------------------------------
 
     def action_go_back(self) -> None:
+        if self._is_searching():
+            return
         self.app.pop_screen()
 
     def action_recover(self) -> None:
+        if self._is_searching():
+            return
         self.app.push_screen(
             RecoveryWizardScreen(self.session, export=self.export, turns=self.turns)
         )
 
     def action_full_preview(self) -> None:
+        if self._is_searching():
+            return
         if not self.turns:
             self.app.notify("No turns to preview.", severity="warning")
             return
         self.app.push_screen(FullPreviewScreen(self.session, self.turns, self.export))
 
     def action_cycle_timestamps(self) -> None:
+        if self._is_searching():
+            return
         app: OrsessionApp = self.app  # type: ignore
         current_idx = TIMESTAMP_MODES.index(app.timestamp_mode)
         app.timestamp_mode = TIMESTAMP_MODES[(current_idx + 1) % len(TIMESTAMP_MODES)]
@@ -364,6 +378,8 @@ class SessionDetailScreen(Screen):
 
     def action_scroll_top(self) -> None:
         """Scroll to the top (oldest exchanges)."""
+        if self._is_searching():
+            return
         try:
             scroll = self.query_one("#detail-scroll", VerticalScroll)
             scroll.scroll_home(animate=False)
@@ -372,6 +388,8 @@ class SessionDetailScreen(Screen):
 
     def action_scroll_bottom(self) -> None:
         """Scroll to the bottom (newest exchanges)."""
+        if self._is_searching():
+            return
         try:
             scroll = self.query_one("#detail-scroll", VerticalScroll)
             scroll.scroll_end(animate=False)
@@ -390,32 +408,35 @@ class SessionDetailScreen(Screen):
             self._search_active = True
             self.app.sub_title = "Search: █"
 
+    def _is_searching(self) -> bool:
+        """Check if search input is active (blocks other bindings)."""
+        return getattr(self, "_search_active", False)
+
     def on_key(self, event) -> None:
-        """Handle character input for search."""
-        if not getattr(self, "_search_active", False):
+        """Handle character input for search. Must stop ALL keys during search."""
+        if not self._is_searching():
             return
 
         key = event.key
+        # Stop the event from propagating to bindings.
+        event.stop()
+        event.prevent_default()
 
         if key == "escape":
             self._search_active = False
             self.app.sub_title = "opencode session recovery"
-            event.prevent_default()
         elif key == "enter":
             self._search_active = False
             self.app.sub_title = "opencode session recovery"
             term = self._search_buffer.strip()
             if term:
                 self._replace_screen(search_term=term, initial_scroll="top")
-            event.prevent_default()
         elif key == "backspace":
             self._search_buffer = self._search_buffer[:-1]
             self.app.sub_title = f"Search: {self._search_buffer}█"
-            event.prevent_default()
         elif len(key) == 1 and key.isprintable():
             self._search_buffer += key
             self.app.sub_title = f"Search: {self._search_buffer}█"
-            event.prevent_default()
 
     def _replace_screen(self, initial_scroll: str = "bottom", search_term: str | None = None) -> None:
         """Pop and push a new detail screen with updated state."""
