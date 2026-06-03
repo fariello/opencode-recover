@@ -69,7 +69,7 @@ TIMESTAMP_MODES = ("medium", "short", "long")
 # ---------------------------------------------------------------------------
 
 class SessionDetailScreen(Screen):
-    """Detailed view of a single session with metadata and preview."""
+    """Detailed view of a single session: compact header + all exchanges scrollable."""
 
     BINDINGS = [
         Binding("escape", "go_back", "Back"),
@@ -77,35 +77,29 @@ class SessionDetailScreen(Screen):
         Binding("r", "recover", "Recover"),
         Binding("p", "full_preview", "Full Preview"),
         Binding("t", "cycle_timestamps", "Timestamps"),
-        Binding("f", "toggle_first", "First"),
-        Binding("l", "toggle_last", "Last"),
+        Binding("f", "scroll_top", "Top"),
+        Binding("l", "scroll_bottom", "Bottom"),
         Binding("slash", "search", "Search"),
         Binding("q", "quit", "Quit"),
     ]
 
-    # View modes: "split" (default), "first" (oldest only), "last" (newest only), "search"
-    VIEW_FIRST_COUNT = 5
-    VIEW_LAST_COUNT = 15
-
-    def __init__(self, session: SessionInfo, export: SessionExport | None = None, turns: list[Turn] | None = None, view_mode: str = "split", search_term: str = "", **kwargs) -> None:
+    def __init__(self, session: SessionInfo, export: SessionExport | None = None, turns: list[Turn] | None = None, search_term: str = "", initial_scroll: str = "bottom", **kwargs) -> None:
         super().__init__(**kwargs)
         self.session = session
         self.export = export
         self.turns = turns or []
-        self.loading = export is None  # Only loading if we need to export.
-        self.view_mode = view_mode  # "split", "first", "last", "search"
+        self.loading = export is None
         self.search_term = search_term
+        self._initial_scroll = initial_scroll  # "top" or "bottom"
 
     def compose(self) -> ComposeResult:
         yield Header()
         if self.loading:
-            # Show loading state — export will happen, then screen gets replaced.
             yield VerticalScroll(
                 Static(self._build_loading_text(), id="detail-content"),
                 id="detail-scroll",
             )
         else:
-            # Already have export data — render full detail immediately.
             yield VerticalScroll(
                 Static(self._build_detail_text(), id="detail-content"),
                 id="detail-scroll",
@@ -113,12 +107,23 @@ class SessionDetailScreen(Screen):
         yield Footer()
 
     def on_mount(self) -> None:
-        """Start export in background if needed."""
+        """Start export in background if needed, or scroll to position."""
         if self.loading:
             import threading
             self._export_result: dict | None = None
             threading.Thread(target=self._export_thread_target, daemon=True).start()
             self.set_interval(0.25, self._poll_export)
+        elif self._initial_scroll == "bottom":
+            # Scroll to bottom after a brief delay to let layout complete.
+            self.set_timer(0.1, self._do_scroll_bottom)
+
+    def _do_scroll_bottom(self) -> None:
+        """Scroll the content to the bottom."""
+        try:
+            scroll = self.query_one("#detail-scroll", VerticalScroll)
+            scroll.scroll_end(animate=False)
+        except Exception:
+            pass
 
     def _build_loading_text(self) -> str:
         """Build the loading screen text."""
@@ -129,20 +134,18 @@ class SessionDetailScreen(Screen):
         session = self.session
         lines = [
             f"[bold]{rich_escape(session.title)}[/]",
-            "─" * min(60, len(session.title) + 4),
             "",
-            f"  [dim]ID:[/]        {rich_escape(session.session_id)}",
-            f"  [dim]Created:[/]   {format_timestamp(session.created, ts_mode)}",
-            f"  [dim]Updated:[/]   {format_timestamp(session.updated, ts_mode)}",
-            f"  [dim]Duration:[/]  {session_duration(session)}",
+            f"  [dim]ID:[/] {rich_escape(session.session_id)}",
+            f"  [dim]Created:[/] {format_timestamp(session.created, ts_mode)}  "
+            f"[dim]Updated:[/] {format_timestamp(session.updated, ts_mode)}",
             "",
-            "  [dim]Loading session export for previews...[/]",
+            "  [dim]Loading session export...[/]",
             "  [dim](Press b or Escape to go back)[/]",
         ]
         return "\n".join(lines)
 
     def _export_thread_target(self) -> None:
-        """Run export in a plain thread. Store result for polling."""
+        """Run export in a plain thread."""
         app: OrsessionApp = self.app  # type: ignore
         try:
             export = export_session(
@@ -166,9 +169,6 @@ class SessionDetailScreen(Screen):
         self._export_result = {"_done": True}
         if "_done" in result:
             return
-
-        # Instead of updating the widget (which deadlocks textual-output
-        # on WSL), pop this screen and push a new one with the data.
         if "error" in result:
             self.app.notify(f"Export failed: {result['error']}", severity="error", timeout=8)
             self.loading = False
@@ -177,38 +177,26 @@ class SessionDetailScreen(Screen):
             export = result["export"]
             turns = result["turns"]
             app.session_turn_cache[self.session.session_id] = len(turns)
-            # Replace this screen with a new one that has the data.
             self.app.pop_screen()
-            self.app.push_screen(SessionDetailScreen(self.session, export=export, turns=turns))
-
-    def _on_export_error(self, error_message: str) -> None:
-        """Handle export failure."""
-        pass  # Handled in _poll_export via notify.
-
-    def _on_export_complete(self, export: SessionExport, turns: list[Turn]) -> None:
-        """Handle successful export."""
-        pass  # Handled in _poll_export via screen replacement.
+            self.app.push_screen(SessionDetailScreen(
+                self.session, export=export, turns=turns, initial_scroll="bottom"
+            ))
 
     def _build_detail_text(self) -> str:
-        """Build the full detail view: compact header + view-mode-dependent exchanges."""
+        """Build compact header + all exchanges as a single scrollable list."""
         try:
-            app = self.app
-            ts_mode = app.timestamp_mode  # type: ignore
+            ts_mode = self.app.timestamp_mode  # type: ignore
+            term_width = self.app.size.width  # type: ignore
         except Exception:
             ts_mode = "medium"
-            app = None
+            term_width = 120
+        preview_width = max(40, term_width - 26)
         session = self.session
         export = self.export
 
-        try:
-            term_width = app.size.width  # type: ignore
-        except Exception:
-            term_width = 120
-        preview_width = max(40, term_width - 26)
-
         lines: list[str] = []
 
-        # ── Compact header (no extra blank lines) ──
+        # ── Compact header ──
         lines.append(f"[bold]{rich_escape(session.title)}[/]")
 
         if export and export.info:
@@ -219,7 +207,6 @@ class SessionDetailScreen(Screen):
             provider = model_info.get("providerID", "") if isinstance(model_info, dict) else ""
             model_str = f"{model_id} ({provider})" if model_id else ""
 
-            # Row 1: ID, slug, model
             row1_parts = [f"[dim]ID:[/] {rich_escape(session.session_id)}"]
             if slug:
                 row1_parts.append(f"[dim]Slug:[/] {slug}")
@@ -227,14 +214,12 @@ class SessionDetailScreen(Screen):
                 row1_parts.append(f"[dim]Model:[/] {model_str}")
             lines.append("  " + "  ".join(row1_parts))
 
-            # Row 2: duration, created, updated
             lines.append(
                 f"  [dim]Duration:[/] {session_duration(session)}  "
                 f"[dim]Created:[/] {format_timestamp(session.created, ts_mode)}  "
                 f"[dim]Updated:[/] {format_timestamp(session.updated, ts_mode)}"
             )
 
-            # Row 3: exchanges, lines, cost
             turn_count = len(self.turns)
             interactions = count_interactions(self.turns)
             total_lines = sum(t.text.count("\n") + 1 for t in self.turns)
@@ -244,7 +229,6 @@ class SessionDetailScreen(Screen):
                 row3 += f"  [dim]Cost:[/] ${cost:.2f}"
             lines.append(row3)
 
-            # Row 4: tokens, changes
             tokens = info.get("tokens", {})
             row4_parts = []
             if isinstance(tokens, dict):
@@ -272,204 +256,128 @@ class SessionDetailScreen(Screen):
             if row4_parts:
                 lines.append("  " + "  ".join(row4_parts))
 
-            # Row 5: directory
             directory = info.get("directory", "")
             if directory:
                 lines.append(f"  [dim]Dir:[/] {rich_escape(directory)}")
         else:
-            # No export info — minimal header.
             lines.append(f"  [dim]ID:[/] {rich_escape(session.session_id)}  "
                          f"[dim]Created:[/] {format_timestamp(session.created, ts_mode)}  "
                          f"[dim]Updated:[/] {format_timestamp(session.updated, ts_mode)}")
 
-        # ── Exchange display (view-mode dependent) ──
-
+        # ── Separator ──
         if not self.turns:
             lines.append("")
             lines.append("  [dim]No exchanges found.[/]")
             return "\n".join(lines)
 
+        lines.append("")
+        usable_width = max(20, term_width - 6)
+        sep_label = " ↓ Exchanges ↓ "
+        sep_remaining = max(0, usable_width - len(sep_label))
+        sep_left = sep_remaining // 2
+        sep_right = sep_remaining - sep_left
+        lines.append(f"[on dark_blue]{'─' * sep_left}{sep_label}{'─' * sep_right}[/]")
+        lines.append("")
+
+        # ── All exchanges (single scrollable list) ──
         total = len(self.turns)
+        search_lower = self.search_term.lower() if self.search_term else ""
 
-        if self.view_mode == "search" and self.search_term:
-            # Search mode: show matching exchanges.
-            term_lower = self.search_term.lower()
-            matches = [(i, t) for i, t in enumerate(self.turns) if term_lower in t.text.lower()]
+        for turn in self.turns:
+            ts = self._get_turn_timestamp(turn)
+            ts_display = f" {rich_escape(format_timestamp(ts, ts_mode))}" if ts else ""
+            role_char = "U" if turn.role == "user" else "A"
+            role_style = "cyan" if turn.role == "user" else "dim"
+            preview_text = _collapse_preview(turn.text, preview_width)
 
-            lines.append("")
-            label = f" Search: \"{self.search_term}\" ({len(matches)} match{'es' if len(matches) != 1 else ''}) "
-            lines.append(self._centered_separator(label, term_width))
-            lines.append("")
-
-            if not matches:
-                lines.append("  [dim]No matches found.[/]")
+            # Highlight search matches in bold red.
+            if search_lower and search_lower in preview_text.lower():
+                # Case-insensitive highlight.
+                import re
+                escaped = rich_escape(preview_text)
+                # Find match positions in the escaped text and wrap them.
+                pattern = re.compile(re.escape(rich_escape(self.search_term)), re.IGNORECASE)
+                escaped = pattern.sub(
+                    lambda m: f"[bold red]{m.group(0)}[/bold red]", escaped
+                )
+                preview = escaped
             else:
-                for idx, turn in matches[:50]:  # Cap at 50 results.
-                    ts = self._get_turn_timestamp(turn)
-                    ts_display = f" {rich_escape(format_timestamp(ts, ts_mode))}" if ts else ""
-                    role_char = "U" if turn.role == "user" else "A"
-                    role_style = "cyan" if turn.role == "user" else "dim"
-                    preview = rich_escape(_collapse_preview(turn.text, preview_width))
-                    lines.append(f"  [{role_style}]{role_char}{ts_display} #{idx+1}:[/] {preview}")
-                if len(matches) > 50:
-                    lines.append(f"  [dim]... and {len(matches) - 50} more matches[/]")
+                preview = rich_escape(preview_text)
 
-        elif self.view_mode == "first":
-            # Show all exchanges from the start (scrollable).
-            lines.append("")
-            label = f" Exchanges, oldest first (1-{total}) "
-            lines.append(self._centered_separator(label, term_width))
-            lines.append("")
-            for turn in self.turns:
-                ts = self._get_turn_timestamp(turn)
-                ts_display = f" {rich_escape(format_timestamp(ts, ts_mode))}" if ts else ""
-                role_char = "U" if turn.role == "user" else "A"
-                role_style = "cyan" if turn.role == "user" else "dim"
-                preview = rich_escape(_collapse_preview(turn.text, preview_width))
-                lines.append(f"  [{role_style}]{role_char}{ts_display}:[/] {preview}")
-
-        elif self.view_mode == "last":
-            # Show all exchanges from the end (scrollable).
-            lines.append("")
-            label = f" Exchanges, newest first ({total}-1) "
-            lines.append(self._centered_separator(label, term_width))
-            lines.append("")
-            for turn in reversed(self.turns):
-                ts = self._get_turn_timestamp(turn)
-                ts_display = f" {rich_escape(format_timestamp(ts, ts_mode))}" if ts else ""
-                role_char = "U" if turn.role == "user" else "A"
-                role_style = "cyan" if turn.role == "user" else "dim"
-                preview = rich_escape(_collapse_preview(turn.text, preview_width))
-                lines.append(f"  [{role_style}]{role_char}{ts_display}:[/] {preview}")
-
-        else:
-            # Split mode (default): first N + last M.
-            first_n = self.VIEW_FIRST_COUNT
-            last_m = self.VIEW_LAST_COUNT
-
-            lines.append("")
-            label = f" Oldest exchanges (1-{min(first_n, total)}) "
-            lines.append(self._centered_separator(label, term_width))
-            lines.append("")
-            for turn in self.turns[:first_n]:
-                ts = self._get_turn_timestamp(turn)
-                ts_display = f" {rich_escape(format_timestamp(ts, ts_mode))}" if ts else ""
-                role_char = "U" if turn.role == "user" else "A"
-                role_style = "cyan" if turn.role == "user" else "dim"
-                preview = rich_escape(_collapse_preview(turn.text, preview_width))
-                lines.append(f"  [{role_style}]{role_char}{ts_display}:[/] {preview}")
-
-            if total > first_n + last_m:
-                omitted = total - first_n - last_m
-                lines.append("")
-                lines.append(f"  [dim]... {omitted} exchanges not shown (f=oldest, l=newest, /=search) ...[/]")
-
-            if total > first_n:
-                show_last = self.turns[-last_m:] if total > last_m else self.turns[first_n:]
-                lines.append("")
-                start_idx = total - len(show_last) + 1
-                label = f" Newest exchanges ({start_idx}-{total}) "
-                lines.append(self._centered_separator(label, term_width))
-                lines.append("")
-                for turn in show_last:
-                    ts = self._get_turn_timestamp(turn)
-                    ts_display = f" {rich_escape(format_timestamp(ts, ts_mode))}" if ts else ""
-                    role_char = "U" if turn.role == "user" else "A"
-                    role_style = "cyan" if turn.role == "user" else "dim"
-                    preview = rich_escape(_collapse_preview(turn.text, preview_width))
-                    lines.append(f"  [{role_style}]{role_char}{ts_display}:[/] {preview}")
+            lines.append(f"  [{role_style}]{role_char}{ts_display}:[/] {preview}")
 
         return "\n".join(lines)
-
-    def _centered_separator(self, label: str, width: int) -> str:
-        """Build a centered label with horizontal line fill (no markup in label)."""
-        # Account for VerticalScroll padding (2 left + 2 right) and scrollbar (2).
-        usable = width - 6
-        label_len = len(label)
-        remaining = max(0, usable - label_len)
-        left = max(2, remaining // 2)
-        right = max(2, remaining - left)
-        return f"{'─' * left}[bold]{rich_escape(label)}[/]{'─' * right}"
 
     def _get_turn_timestamp(self, turn: Turn) -> str:
         """Try to find the timestamp for a turn from the export messages."""
         if not self.export or not self.export.messages:
             return ""
-
-        # The turn.source is like "$.messages[4]" — extract the index.
         import re
         match = re.search(r"\$\.messages\[(\d+)\]", turn.source)
         if not match:
             return ""
-
         msg_idx = int(match.group(1))
         if msg_idx >= len(self.export.messages):
             return ""
-
         msg = self.export.messages[msg_idx]
         info = msg.get("info", {})
         time_info = info.get("time", {})
         created = time_info.get("created")
-        if created is not None:
-            return str(created)
-        return ""
+        return str(created) if created is not None else ""
 
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
 
     def action_go_back(self) -> None:
-        """Return to session list."""
         self.app.pop_screen()
 
     def action_recover(self) -> None:
-        """Start recovery wizard for this session."""
         self.app.push_screen(
             RecoveryWizardScreen(self.session, export=self.export, turns=self.turns)
         )
 
     def action_full_preview(self) -> None:
-        """Open full preview screen."""
         if not self.turns:
             self.app.notify("No turns to preview.", severity="warning")
             return
         self.app.push_screen(FullPreviewScreen(self.session, self.turns, self.export))
 
     def action_cycle_timestamps(self) -> None:
-        """Cycle timestamp mode and re-render."""
         app: OrsessionApp = self.app  # type: ignore
         current_idx = TIMESTAMP_MODES.index(app.timestamp_mode)
         app.timestamp_mode = TIMESTAMP_MODES[(current_idx + 1) % len(TIMESTAMP_MODES)]
         if not self.loading:
-            self._replace_screen()
+            self._replace_screen(initial_scroll=self._initial_scroll)
         self.app.notify(f"Timestamps: {app.timestamp_mode}", timeout=2)
 
-    def action_toggle_first(self) -> None:
-        """Toggle to oldest-first view or back to split."""
-        if self.loading:
-            return
-        new_mode = "split" if self.view_mode == "first" else "first"
-        self._replace_screen(view_mode=new_mode)
+    def action_scroll_top(self) -> None:
+        """Scroll to the top (oldest exchanges)."""
+        try:
+            scroll = self.query_one("#detail-scroll", VerticalScroll)
+            scroll.scroll_home(animate=False)
+        except Exception:
+            pass
 
-    def action_toggle_last(self) -> None:
-        """Toggle to newest-first view or back to split."""
-        if self.loading:
-            return
-        new_mode = "split" if self.view_mode == "last" else "last"
-        self._replace_screen(view_mode=new_mode)
+    def action_scroll_bottom(self) -> None:
+        """Scroll to the bottom (newest exchanges)."""
+        try:
+            scroll = self.query_one("#detail-scroll", VerticalScroll)
+            scroll.scroll_end(animate=False)
+        except Exception:
+            pass
 
     def action_search(self) -> None:
-        """Prompt for search term."""
+        """Start search input mode."""
         if self.loading:
             return
-        # Simple approach: use notify to ask, then capture via on_key.
-        # For now, toggle into/out of search mode with a basic input.
-        if self.view_mode == "search":
-            self._replace_screen(view_mode="split")
+        if self.search_term:
+            # Clear search.
+            self._replace_screen(search_term="", initial_scroll="bottom")
         else:
             self._search_buffer = ""
             self._search_active = True
-            self.app.notify("Type search term, then Enter. Esc to cancel.", timeout=5)
+            self.app.sub_title = "Search: █"
 
     def on_key(self, event) -> None:
         """Handle character input for search."""
@@ -480,34 +388,33 @@ class SessionDetailScreen(Screen):
 
         if key == "escape":
             self._search_active = False
-            self.app.notify("Search cancelled.", timeout=2)
+            self.app.sub_title = "opencode session recovery"
             event.prevent_default()
         elif key == "enter":
             self._search_active = False
+            self.app.sub_title = "opencode session recovery"
             term = self._search_buffer.strip()
             if term:
-                self._replace_screen(view_mode="search", search_term=term)
-            else:
-                self.app.notify("Empty search term.", timeout=2)
+                self._replace_screen(search_term=term, initial_scroll="top")
             event.prevent_default()
         elif key == "backspace":
             self._search_buffer = self._search_buffer[:-1]
-            self.app.notify(f"Search: {self._search_buffer}█", timeout=10)
+            self.app.sub_title = f"Search: {self._search_buffer}█"
             event.prevent_default()
         elif len(key) == 1 and key.isprintable():
             self._search_buffer += key
-            self.app.notify(f"Search: {self._search_buffer}█", timeout=10)
+            self.app.sub_title = f"Search: {self._search_buffer}█"
             event.prevent_default()
 
-    def _replace_screen(self, view_mode: str | None = None, search_term: str | None = None) -> None:
+    def _replace_screen(self, initial_scroll: str = "bottom", search_term: str | None = None) -> None:
         """Pop and push a new detail screen with updated state."""
         self.app.pop_screen()
         self.app.push_screen(SessionDetailScreen(
             self.session,
             export=self.export,
             turns=self.turns,
-            view_mode=view_mode if view_mode is not None else self.view_mode,
             search_term=search_term if search_term is not None else self.search_term,
+            initial_scroll=initial_scroll,
         ))
 
 
