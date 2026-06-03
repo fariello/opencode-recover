@@ -98,7 +98,6 @@ class SessionDetailScreen(Screen):
             yield Static(self._build_loading_text(), id="detail-header")
         else:
             yield Static(self._build_header_text(), id="detail-header")
-            yield Static(self._build_separator(), id="detail-separator")
             exchanges_text = self._build_exchanges_text()
             # Fall back to stripped plain text if markup confuses textual's parser.
             try:
@@ -106,10 +105,13 @@ class SessionDetailScreen(Screen):
                 Content.from_markup(exchanges_text)
                 use_markup = True
             except Exception:
-                # Strip all markup tags so raw tags don't show.
                 import re
                 exchanges_text = re.sub(r"\[/?[^\]]*\]", "", exchanges_text)
                 use_markup = False
+            yield Static(
+                self._build_separator(plain_text_mode=not use_markup),
+                id="detail-separator",
+            )
             yield VerticalScroll(
                 Static(exchanges_text, id="detail-exchanges", markup=use_markup),
                 id="detail-scroll",
@@ -280,10 +282,13 @@ class SessionDetailScreen(Screen):
 
         return "\n".join(lines)
 
-    def _build_separator(self) -> str:
-        """Build the separator bar content (centered label, no markup colors — CSS handles bg)."""
+    def _build_separator(self, plain_text_mode: bool = False) -> str:
+        """Build the separator bar content (centered label, CSS handles bg)."""
         term_width = self._get_term_width()
-        label = "↓ Exchanges ↓"
+        if plain_text_mode:
+            label = "↓ Exchanges (plain text — session too large for colors) ↓"
+        else:
+            label = "↓ Exchanges ↓"
         return label.center(term_width)
 
     def _build_exchanges_text(self) -> str:
