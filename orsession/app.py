@@ -15,7 +15,6 @@ from . import __version__
 from pathlib import Path
 
 from rich.markup import escape as rich_escape
-from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
@@ -98,10 +97,19 @@ class SessionDetailScreen(Screen):
 
     def on_mount(self) -> None:
         """Show metadata immediately, then start export in background."""
+        import threading
+
         # Show what we know from the session list immediately (no export needed).
         self._render_metadata_only()
-        # Then kick off the export for previews.
-        self._load_export_in_background()
+
+        # Start export in a plain thread — no textual worker API.
+        # Results are stored in instance vars; a timer polls for completion.
+        self._export_result: dict | None = None
+        self._export_thread = threading.Thread(
+            target=self._export_thread_target, daemon=True
+        )
+        self._export_thread.start()
+        self.set_interval(0.25, self._poll_export)
 
     def _render_metadata_only(self) -> None:
         """Render session metadata from list data (no export required)."""
@@ -124,11 +132,9 @@ class SessionDetailScreen(Screen):
         content_widget = self.query_one("#detail-content", Static)
         content_widget.update("\n".join(lines))
 
-    @work(thread=True)
-    def _load_export_in_background(self) -> None:
-        """Export the session in a background thread."""
+    def _export_thread_target(self) -> None:
+        """Run export in a plain thread. Store result for polling."""
         app: OrsessionApp = self.app  # type: ignore
-
         try:
             export = export_session(
                 session_id=self.session.session_id,
@@ -139,11 +145,28 @@ class SessionDetailScreen(Screen):
             turns = filter_conversation_turns(
                 extract_turns_from_export(export, include_tools=False)
             )
+            self._export_result = {"export": export, "turns": turns}
         except RecoveryError as e:
-            self.app.call_later(self._on_export_error, str(e))
+            self._export_result = {"error": str(e)}
+
+    def _poll_export(self) -> None:
+        """Timer callback: check if export thread finished."""
+        if self._export_result is None:
+            return  # Still running.
+
+        # Stop polling.
+        # (set_interval returns a Timer; we can't easily cancel, but
+        # setting _export_result to a sentinel prevents re-processing)
+        result = self._export_result
+        self._export_result = {"_done": True}  # Prevent re-entry.
+
+        if "_done" in result:
             return
 
-        self.app.call_later(self._on_export_complete, export, turns)
+        if "error" in result:
+            self._on_export_error(result["error"])
+        else:
+            self._on_export_complete(result["export"], result["turns"])
 
     def _on_export_error(self, error_message: str) -> None:
         """Handle export failure (called on main thread)."""
@@ -708,16 +731,18 @@ class RecoveryWizardScreen(Screen):
 
     def _run_recovery_pipeline(self) -> None:
         """Kick off the recovery pipeline in a background thread."""
+        import threading
         self.step = "exporting"
         self._render_step()
-        self._run_recovery_pipeline_async()
+        self._pipeline_result: dict | None = None
+        threading.Thread(target=self._pipeline_thread_target, daemon=True).start()
+        self.set_interval(0.25, self._poll_pipeline)
 
-    @work(thread=True, exclusive=True)
-    def _run_recovery_pipeline_async(self) -> None:
-        """Export session, extract turns, apply truncation, generate recovery files."""
+    def _pipeline_thread_target(self) -> None:
+        """Run recovery pipeline in a plain thread."""
         app: OrsessionApp = self.app  # type: ignore
 
-        # Step: Export (if not already done).
+        # Export (if not already done).
         if not self.export:
             try:
                 self.export = export_session(
@@ -726,7 +751,7 @@ class RecoveryWizardScreen(Screen):
                     cwd=app.session_dir,
                 )
             except RecoveryError as e:
-                self.app.call_later(self._on_pipeline_error, f"Export failed: {e}")
+                self._pipeline_result = {"error": f"Export failed: {e}"}
                 return
 
         # Extract turns.
@@ -735,7 +760,7 @@ class RecoveryWizardScreen(Screen):
         )
 
         if not turns:
-            self.app.call_later(self._on_pipeline_error, "No user/assistant turns found in export.")
+            self._pipeline_result = {"error": "No user/assistant turns found in export."}
             return
 
         # Apply truncation.
@@ -762,10 +787,29 @@ class RecoveryWizardScreen(Screen):
                 ),
             )
         except RecoveryError as e:
-            self.app.call_later(self._on_pipeline_error, f"Generation failed: {e}")
+            self._pipeline_result = {"error": f"Generation failed: {e}"}
             return
 
-        self.app.call_later(self._on_pipeline_complete, turns, total_before, generated_files)
+        self._pipeline_result = {
+            "turns": turns,
+            "total_before": total_before,
+            "generated_files": generated_files,
+        }
+
+    def _poll_pipeline(self) -> None:
+        """Timer callback: check if pipeline thread finished."""
+        if self._pipeline_result is None:
+            return
+        result = self._pipeline_result
+        self._pipeline_result = {"_done": True}
+        if "_done" in result:
+            return
+        if "error" in result:
+            self._on_pipeline_error(result["error"])
+        else:
+            self._on_pipeline_complete(
+                result["turns"], result["total_before"], result["generated_files"]
+            )
 
     def _on_pipeline_error(self, message: str) -> None:
         """Handle pipeline failure (main thread)."""
@@ -1564,13 +1608,15 @@ class CompactionScreen(Screen):
 
     def _run_compaction(self) -> None:
         """Kick off the API call in a background thread."""
+        import threading
         self.step = "running"
         self._render_step()
-        self._run_compaction_async()
+        self._compaction_result: dict | None = None
+        threading.Thread(target=self._compaction_thread_target, daemon=True).start()
+        self.set_interval(0.5, self._poll_compaction)
 
-    @work(thread=True, exclusive=True)
-    def _run_compaction_async(self) -> None:
-        """Execute the API call in a background thread."""
+    def _compaction_thread_target(self) -> None:
+        """Execute the API call in a plain thread."""
         app: OrsessionApp = self.app  # type: ignore
 
         # Build the prompt.
@@ -1588,7 +1634,7 @@ class CompactionScreen(Screen):
         try:
             result = call_compaction_api(self.model, prompt_content)
         except RecoveryError as e:
-            self.app.call_later(self._on_compaction_error, str(e))
+            self._compaction_result = {"error": str(e)}
             return
 
         # Save the compacted output.
@@ -1599,10 +1645,26 @@ class CompactionScreen(Screen):
         try:
             write_text(compacted_path, result["content"])
         except RecoveryError as e:
-            self.app.call_later(self._on_compaction_error, f"Failed to save output: {e}")
+            self._compaction_result = {"error": f"Failed to save output: {e}"}
             return
 
-        self.app.call_later(self._on_compaction_complete, compacted_path, result.get("usage", {}))
+        self._compaction_result = {
+            "compacted_path": compacted_path,
+            "usage": result.get("usage", {}),
+        }
+
+    def _poll_compaction(self) -> None:
+        """Timer callback: check if compaction thread finished."""
+        if self._compaction_result is None:
+            return
+        result = self._compaction_result
+        self._compaction_result = {"_done": True}
+        if "_done" in result:
+            return
+        if "error" in result:
+            self._on_compaction_error(result["error"])
+        else:
+            self._on_compaction_complete(result["compacted_path"], result["usage"])
 
     def _on_compaction_error(self, error_message: str) -> None:
         """Handle API call failure (main thread)."""
