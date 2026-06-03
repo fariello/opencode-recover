@@ -100,12 +100,15 @@ class SessionDetailScreen(Screen):
             yield Static(self._build_header_text(), id="detail-header")
             yield Static(self._build_separator(), id="detail-separator")
             exchanges_text = self._build_exchanges_text()
-            # Fall back to no-markup if the text confuses textual's parser.
+            # Fall back to stripped plain text if markup confuses textual's parser.
             try:
                 from textual.content import Content
                 Content.from_markup(exchanges_text)
                 use_markup = True
             except Exception:
+                # Strip all markup tags so raw tags don't show.
+                import re
+                exchanges_text = re.sub(r"\[/?[^\]]*\]", "", exchanges_text)
                 use_markup = False
             yield VerticalScroll(
                 Static(exchanges_text, id="detail-exchanges", markup=use_markup),
