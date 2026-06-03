@@ -268,6 +268,14 @@ class SessionDetailScreen(Screen):
         lines.append("")
 
         # Preview: first exchanges.
+        # Calculate available width for preview text (terminal width minus prefix).
+        try:
+            term_width = app.size.width
+        except Exception:
+            term_width = 120
+        # Prefix is "  U Jun-02 12:34: " — about 22 chars including markup overhead.
+        preview_width = max(40, term_width - 22)
+
         if self.turns:
             first_turns = self.turns[:5]
             lines.append(f"  [bold]── First exchanges ──[/]")
@@ -277,7 +285,7 @@ class SessionDetailScreen(Screen):
                 ts_display = f" {rich_escape(format_timestamp(ts, ts_mode))}" if ts else ""
                 role_char = "U" if turn.role == "user" else "A"
                 role_style = "cyan" if turn.role == "user" else "dim"
-                preview = rich_escape(_collapse_preview(turn.text, 80))
+                preview = rich_escape(_collapse_preview(turn.text, preview_width))
                 lines.append(f"  [{role_style}]{role_char}{ts_display}:[/] {preview}")
             lines.append("")
 
@@ -297,7 +305,7 @@ class SessionDetailScreen(Screen):
                     ts_display = f" {rich_escape(format_timestamp(ts, ts_mode))}" if ts else ""
                     role_char = "U" if turn.role == "user" else "A"
                     role_style = "cyan" if turn.role == "user" else "dim"
-                    preview = rich_escape(_collapse_preview(turn.text, 80))
+                    preview = rich_escape(_collapse_preview(turn.text, preview_width))
                     lines.append(f"  [{role_style}]{role_char}{ts_display}:[/] {preview}")
                 lines.append("")
         else:
