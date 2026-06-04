@@ -3717,7 +3717,7 @@ def clean_previous_recovery_files(
     if removed:
         print(color_green(f"Removed {removed} previous recovery file{'s' if removed != 1 else ''} for session {session_id}."))
     else:
-        print(color_dim(f"No previous recovery files found for session {session_id}."))
+        print(f"No previous recovery files found for session {session_id}.")
 
     pass
 
@@ -3765,7 +3765,7 @@ def run_compaction(
     model = resolve_model(models, model_spec)
 
     print(f"  Model:    {color_cyan(f'{model.provider_id}/{model.model_id}')} ({model.name})")
-    print(f"  Endpoint: {color_dim(model.base_url)}")
+    print(f"  Endpoint: {model.base_url}")
 
     # Load the compact prompt content.
     try:
@@ -3785,23 +3785,23 @@ def run_compaction(
     if cost is not None:
         print(f"  Est cost: {color_yellow(f'${cost:.4f}')}")
     else:
-        print(f"  Est cost: {color_dim('unknown (no cost info for this model)')}")
+        print(f"  Est cost: unknown (no cost info for this model)")
 
     print()
-    print(color_dim("  Note: The session transcript will be sent to the API endpoint above."))
+    print("  Note: The session transcript will be sent to the API endpoint above.")
     print()
 
     # Ask for confirmation if interactive.
     if hasattr(sys.stdin, "isatty") and sys.stdin.isatty():
         answer = input("Proceed with compaction? [Y/n]: ").strip().lower()
         if answer in {"n", "no"}:
-            print(color_dim("Compaction cancelled."))
+            print("  Compaction cancelled.")
             return None
     else:
         log("Non-interactive mode: proceeding with compaction.", verbosity)
 
     print()
-    print(color_dim("Calling API (this may take a minute)..."))
+    print("  Calling API (this may take a minute)...")
 
     response_text = call_compaction_api(
         model=model,
@@ -4213,8 +4213,10 @@ def main() -> None:
 
     try:
         print(color_bold("opencode session recovery"))
-        if session_dir is not None:
-            print(f"Session directory: {color_cyan(str(session_dir))}")
+        if _project_dir:
+            print(f"Project: {_project_dir}")
+        elif session_dir is not None:
+            print(f"Directory: {session_dir}")
         print()
 
         require_opencode()
@@ -4231,15 +4233,22 @@ def main() -> None:
             resolved = resolve_session_spec(args.session, db_sessions) if db_sessions else None
             if resolved:
                 session = find_session_by_id(sessions, resolved["id"])
+                # Use DB title if find_session_by_id returned a placeholder.
+                if session.title == "(provided session ID)":
+                    session = SessionInfo(
+                        session_id=resolved["id"],
+                        title=resolved["title"],
+                        created=str(resolved.get("created", "")),
+                        updated=str(resolved.get("updated", "")),
+                        raw=resolved,
+                    )
             else:
                 session = find_session_by_id(sessions, args.session)
-            print(f"Selected session from --session: {color_dim(session.session_id)}")
         else:
             session = prompt_for_session(sessions)
 
-        print()
-        print(f"Selected session: {color_bold(session.title)}")
-        print(f"Session ID: {color_dim(session.session_id)}")
+        print(f"Session: {color_bold(session.title)}")
+        print(f"  ID: {session.session_id}")
         print()
 
         output_dir = args.out
