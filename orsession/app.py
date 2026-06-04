@@ -612,8 +612,16 @@ class RecoveryWizardScreen(Screen):
     """
 
     BINDINGS = [
-        Binding("escape", "go_back", "Back"),
-        Binding("b", "go_back", "Back"),
+        Binding("p", "proceed", "Proceed", priority=True),
+        Binding("i", "toggle_tools", "Tools", priority=True),
+        Binding("d", "toggle_clean", "Clean Prev", priority=True),
+        Binding("m", "set_max_interactions", "MaxInteract", priority=True),
+        Binding("l", "set_max_lines", "MaxLines", priority=True),
+        Binding("x", "clear_limits", "ClearLimits", priority=True),
+        Binding("y", "compact", "LLM Compact", priority=True),
+        Binding("v", "view_transcript", "View", priority=True),
+        Binding("escape", "go_back", "Back", priority=True),
+        Binding("b", "go_back", "Back", show=False, priority=True),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -669,7 +677,6 @@ class RecoveryWizardScreen(Screen):
         lines.append(f"[dim]{rich_escape(session.session_id)}[/]")
         lines.append("")
         lines.append("[bold]Step 1 of 3: Configure[/]")
-        lines.append("[dim]Keys: P=Proceed  i=Tools  d=Clean  m=MaxInteractions  l=MaxLines  x=ClearLimits  b=Back  q=Quit[/]")
         lines.append("─" * 40)
         lines.append("")
 
@@ -677,7 +684,13 @@ class RecoveryWizardScreen(Screen):
         existing = [f for f in app.recovery_files
                     if f.session_id == safe_filename(session.session_id)]
         if existing:
-            lines.append(f"  [yellow]Existing files:[/]  {len(existing)} recovery file(s) already exist for this session")
+            lines.append(f"  [yellow]Existing files:[/]  {len(existing)} already exist for this session:")
+            by_type: dict[str, int] = {}
+            for f in existing:
+                by_type[f.file_type] = by_type.get(f.file_type, 0) + 1
+            type_summary = ", ".join(f"{count} {ftype}" for ftype, count in sorted(by_type.items()))
+            lines.append(f"    [dim]{type_summary}[/]")
+            lines.append(f"    [dim]Use 'd' to enable 'clean previous' before proceeding.[/]")
             lines.append("")
 
         # Show current settings.
@@ -730,17 +743,6 @@ class RecoveryWizardScreen(Screen):
             lines.append("")
             lines.append("  [dim]Session size will be calculated after export.[/]")
 
-        lines.append("")
-        lines.append("─" * 40)
-        lines.append("")
-        lines.append("  [bold][P][/] Proceed")
-        lines.append("  [bold][i][/] Toggle include tools")
-        lines.append("  [bold][d][/] Toggle clean previous files")
-        lines.append("  [bold][m][/] Set max interactions")
-        lines.append("  [bold][l][/] Set max lines")
-        lines.append("  [bold][x][/] Clear truncation limits")
-        lines.append("")
-
         content = self.query_one("#wizard-content", Static)
         content.update("\n".join(lines))
 
@@ -780,7 +782,6 @@ class RecoveryWizardScreen(Screen):
         lines.append(f"[bold]Recovering: {rich_escape(self.session.title)}[/]")
         lines.append("")
         lines.append("[bold green]Step 3 of 3: Complete[/]")
-        lines.append("[dim]Keys: y=Compact via LLM  v=View transcript  b=Done  q=Quit[/]")
         lines.append("─" * 40)
         lines.append("")
 
@@ -802,74 +803,80 @@ class RecoveryWizardScreen(Screen):
             lines.append("")
             lines.append(f"  Turns written: {turn_count} ({interactions} interactions)")
 
-        lines.append("")
-        lines.append("─" * 40)
-        lines.append("")
-        lines.append("  [bold][y][/] Generate LLM-compacted version (select model)")
-        lines.append("  [bold][v][/] View generated transcript")
-        lines.append("  [bold][b][/] Done (return to session list)")
-        lines.append("")
-
         content = self.query_one("#wizard-content", Static)
         content.update("\n".join(lines))
 
     # ------------------------------------------------------------------
-    # Key Handling
+    # Actions (shown in footer via BINDINGS)
     # ------------------------------------------------------------------
 
-    def on_key(self, event) -> None:
-        """Handle step-specific key presses."""
-        key = event.key
-
+    def action_proceed(self) -> None:
         if self.step == "configure":
-            if key in ("p", "P"):
-                self._run_recovery_pipeline()
-            elif key == "i":
-                self.include_tools = not self.include_tools
-                # Re-extract turns if we have an export.
-                if self.export:
-                    self.turns = filter_conversation_turns(
-                        extract_turns_from_export(self.export, include_tools=self.include_tools)
-                    )
-                self._render_step()
-            elif key == "d":
-                self.clean_previous = not self.clean_previous
-                self._render_step()
-            elif key == "m":
-                # Toggle max interactions: None → 50 → 100 → None.
-                if self.max_interactions is None:
-                    self.max_interactions = 50
-                elif self.max_interactions == 50:
-                    self.max_interactions = 100
-                else:
-                    self.max_interactions = None
-                self._render_step()
-            elif key == "l":
-                # Toggle max lines: None → 1500 → 2500 → None.
-                if self.max_lines is None:
-                    self.max_lines = 1500
-                elif self.max_lines == 1500:
-                    self.max_lines = 2500
-                else:
-                    self.max_lines = None
-                self._render_step()
-            elif key == "x":
-                self.max_interactions = None
-                self.max_lines = None
-                self._render_step()
+            self._run_recovery_pipeline()
 
-        elif self.step == "complete":
-            if key == "y":
-                self.app.push_screen(ModelSelectionScreen(
-                    turns=self.turns,
-                    session=self.session,
-                    generated_files=self.generated_files,
-                ))
-            elif key == "v":
-                if self.turns:
-                    self.app.push_screen(
-                        FullPreviewScreen(self.session, self.turns, self.export)
-                    )
+    def action_toggle_tools(self) -> None:
+        if self.step != "configure":
+            return
+        self.include_tools = not self.include_tools
+        if self.export:
+            self.turns = filter_conversation_turns(
+                extract_turns_from_export(self.export, include_tools=self.include_tools)
+            )
+        self._render_step()
+
+    def action_toggle_clean(self) -> None:
+        if self.step != "configure":
+            return
+        self.clean_previous = not self.clean_previous
+        self._render_step()
+
+    def action_set_max_interactions(self) -> None:
+        if self.step != "configure":
+            return
+        # Cycle: None → 50 → 100 → None.
+        if self.max_interactions is None:
+            self.max_interactions = 50
+        elif self.max_interactions == 50:
+            self.max_interactions = 100
+        else:
+            self.max_interactions = None
+        self._render_step()
+
+    def action_set_max_lines(self) -> None:
+        if self.step != "configure":
+            return
+        # Cycle: None → 1500 → 2500 → None.
+        if self.max_lines is None:
+            self.max_lines = 1500
+        elif self.max_lines == 1500:
+            self.max_lines = 2500
+        else:
+            self.max_lines = None
+        self._render_step()
+
+    def action_clear_limits(self) -> None:
+        if self.step != "configure":
+            return
+        self.max_interactions = None
+        self.max_lines = None
+        self._render_step()
+
+    def action_compact(self) -> None:
+        if self.step != "complete":
+            return
+        self.app.push_screen(ModelSelectionScreen(
+            turns=self.turns,
+            session=self.session,
+            generated_files=self.generated_files,
+        ))
+
+    def action_view_transcript(self) -> None:
+        if self.step != "complete":
+            return
+        if self.turns:
+            self.app.push_screen(
+                FullPreviewScreen(self.session, self.turns, self.export)
+            )
 
     # ------------------------------------------------------------------
     # Recovery Logic
