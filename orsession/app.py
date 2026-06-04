@@ -2377,24 +2377,32 @@ class SessionListScreen(Screen):
             self.app.notify(f"Hiding {child_count} subagent sessions", timeout=3)
 
     def action_delete_session(self) -> None:
-        """Delete the selected session (requires double-press to confirm)."""
+        """Delete the selected session (press y to confirm)."""
         session = self._get_selected_session()
         if not session:
             return
-        # Double-press confirmation pattern.
-        pending = getattr(self, "_pending_delete_session", None)
-        if pending == session.session_id:
-            # Second press — do the delete.
-            self._pending_delete_session = None
-            self._do_delete_session(session)
+        # Enter delete confirmation mode.
+        self._delete_candidate = session
+        self.app.notify(
+            f"DELETE '{session.title[:40]}'? Press y to confirm, anything else to cancel. IRREVERSIBLE.",
+            severity="warning",
+            timeout=10,
+        )
+
+    def on_key(self, event) -> None:
+        """Handle delete confirmation."""
+        candidate = getattr(self, "_delete_candidate", None)
+        if candidate is None:
+            return
+
+        # Any key clears the candidate; only 'y' confirms.
+        self._delete_candidate = None
+        if event.key == "y":
+            self._do_delete_session(candidate)
         else:
-            # First press — show warning.
-            self._pending_delete_session = session.session_id
-            self.app.notify(
-                f"Press d again to DELETE: {session.title[:40]} (IRREVERSIBLE)",
-                severity="warning",
-                timeout=5,
-            )
+            self.app.notify("Delete cancelled.", timeout=2)
+        event.stop()
+        event.prevent_default()
 
     def _do_delete_session(self, session: SessionInfo) -> None:
         """Actually delete the session via opencode CLI."""
