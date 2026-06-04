@@ -4012,6 +4012,7 @@ def main() -> None:
             print(f"  Directory:    {session_data['project_dir']}")
         print()
         print(color_red("  THIS ACTION IS IRREVERSIBLE."))
+        print(f"  Will run: opencode session delete {session_data['id']}")
         print()
 
         try:
