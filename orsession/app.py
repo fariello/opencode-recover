@@ -618,8 +618,8 @@ class RecoveryWizardScreen(Screen):
         Binding("m", "set_max_interactions", "MaxInteract", priority=True),
         Binding("l", "set_max_lines", "MaxLines", priority=True),
         Binding("x", "clear_limits", "ClearLimits", priority=True),
-        Binding("y", "compact", "LLM Compact", priority=True),
-        Binding("v", "view_transcript", "View", priority=True),
+        Binding("y", "compact", "LLM Compact", show=False, priority=True),
+        Binding("v", "view_transcript", "View", show=False, priority=True),
         Binding("escape", "go_back", "Back", priority=True),
         Binding("b", "go_back", "Back", show=False, priority=True),
         Binding("q", "quit", "Quit"),
@@ -802,6 +802,13 @@ class RecoveryWizardScreen(Screen):
             interactions = count_interactions(self.turns)
             lines.append("")
             lines.append(f"  Turns written: {turn_count} ({interactions} interactions)")
+
+        lines.append("")
+        lines.append("─" * 40)
+        lines.append("")
+        lines.append("  [bold]y[/] Generate LLM-compacted version (select model)")
+        lines.append("  [bold]v[/] View generated transcript")
+        lines.append("  [bold]b[/] Done (return to previous screen)")
 
         content = self.query_one("#wizard-content", Static)
         content.update("\n".join(lines))
