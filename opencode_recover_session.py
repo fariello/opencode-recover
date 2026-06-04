@@ -3945,9 +3945,15 @@ def main() -> None:
             die("--delete requires --session (or -s) to identify the session.\n"
                 "Use --list-sessions to see available sessions.")
 
-        sessions = db_list_sessions(_project_id)
-        if not sessions:
+        all_sessions = db_list_sessions(_project_id)
+        if not all_sessions:
             die("No sessions found. Try --list-projects first.")
+
+        # Apply same filter as --list-sessions: hide children unless -A.
+        if args.all_sessions:
+            sessions = all_sessions
+        else:
+            sessions = [s for s in all_sessions if not s["parent_id"]]
 
         session_data = resolve_session_spec(session_spec, sessions)
         if not session_data:
@@ -4043,9 +4049,15 @@ def main() -> None:
             die("--details, --head, and --tail require --session (or -s) to identify the session.\n"
                 "Use --list-sessions to see available sessions.")
 
-        sessions = db_list_sessions(_project_id)
-        if not sessions:
+        all_sessions = db_list_sessions(_project_id)
+        if not all_sessions:
             die("No sessions found. Try --list-projects first.")
+
+        # Apply same filter as --list-sessions: hide children unless -A.
+        if args.all_sessions:
+            sessions = all_sessions
+        else:
+            sessions = [s for s in all_sessions if not s["parent_id"]]
 
         session_data = resolve_session_spec(session_spec, sessions)
         if not session_data:
