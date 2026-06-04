@@ -1342,9 +1342,8 @@ def display_turn_preview(turns: list["Turn"], max_preview: int = 20) -> None:
     preview_turns = turns[-max_preview:]
     skipped = len(turns) - len(preview_turns)
 
-    print(color_bold("Session tail preview:"))
     if skipped > 0:
-        print(color_dim(f"  ... ({skipped} earlier turns omitted)"))
+        print(f"  ... ({skipped} earlier turns omitted)")
 
     for turn in preview_turns:
         role_label = "U" if turn.role == "user" else "A"
@@ -3090,9 +3089,7 @@ def recover_from_export(
         ),
     )
 
-    print()
-    print(f"Extracted turns: {color_bold(str(len(selected_turns)))}")
-    print()
+    print(f"\nExtracted turns: {color_bold(str(len(selected_turns)))} Session tail preview:")
     display_turn_preview(selected_turns)
 
     return [transcript_path, restart_path, compact_prompt_path]
@@ -3755,17 +3752,12 @@ def run_compaction(
         Path to the compacted output file, or None if the user cancelled.
     """
 
-    print()
     print(color_bold("LLM Compaction"))
-    print()
 
     # Load config and resolve model.
     config = load_opencode_config(verbosity=verbosity)
     models = extract_models_from_config(config)
     model = resolve_model(models, model_spec)
-
-    print(f"  Model:    {color_cyan(f'{model.provider_id}/{model.model_id}')} ({model.name})")
-    print(f"  Endpoint: {model.base_url}")
 
     # Load the compact prompt content.
     try:
@@ -3775,23 +3767,18 @@ def run_compaction(
 
     # Estimate tokens and cost (includes system message + full user prompt).
     input_tokens = estimate_tokens(COMPACTION_SYSTEM_PROMPT) + estimate_tokens(prompt_content)
-    # Estimate output at ~20% of input (compaction should be much shorter).
     output_tokens_est = max(500, input_tokens // 5)
-
-    print(f"  Input:    ~{input_tokens:,} tokens (estimated)")
-    print(f"  Output:   ~{output_tokens_est:,} tokens (estimated)")
-
     cost = estimate_cost(input_tokens, output_tokens_est, model)
-    if cost is not None:
-        print(f"  Est cost: {color_yellow(f'${cost:.4f}')}")
-    else:
-        print(f"  Est cost: unknown (no cost info for this model)")
 
-    print()
-    print("  Note: The session transcript will be sent to the API endpoint above.")
-    print()
+    print(f"  Model:    {color_cyan(f'{model.provider_id}/{model.model_id}')} ({model.name})")
+    print(f"  Endpoint: {model.base_url}")
+    cost_str = f"${cost:.4f}" if cost is not None else "unknown"
+    print(f"  Input:    ~{input_tokens:,} tokens (estimated)  Output: ~{output_tokens_est:,} tokens (estimated)")
+    print(f"  Est cost: {cost_str}")
+    print(f"  Note: The session transcript will be sent to the API endpoint above.")
 
     # Ask for confirmation if interactive.
+    print()
     if hasattr(sys.stdin, "isatty") and sys.stdin.isatty():
         answer = input("Proceed with compaction? [Y/n]: ").strip().lower()
         if answer in {"n", "no"}:
@@ -3800,7 +3787,6 @@ def run_compaction(
     else:
         log("Non-interactive mode: proceeding with compaction.", verbosity)
 
-    print()
     print("  Calling API (this may take a minute)...")
 
     response_text = call_compaction_api(
@@ -4217,7 +4203,6 @@ def main() -> None:
             print(f"Project: {_project_dir}")
         elif session_dir is not None:
             print(f"Directory: {session_dir}")
-        print()
 
         require_opencode()
 
@@ -4248,8 +4233,7 @@ def main() -> None:
             session = prompt_for_session(sessions)
 
         print(f"Session: {color_bold(session.title)}")
-        print(f"  ID: {session.session_id}")
-        print()
+        print(f"     ID: {session.session_id}")
 
         output_dir = args.out
         generated_paths: list[Path] = []
@@ -4262,12 +4246,10 @@ def main() -> None:
             verbosity=verbosity,
         )
         if prior_context:
-            print(f"Loaded prior context: {color_cyan(f'{len(args.input_compact) + len(args.input_restart) + len(args.input_transcript)} file(s)')}")
-            print()
+            print(f"Loaded prior context: {len(args.input_compact) + len(args.input_restart) + len(args.input_transcript)} file(s)")
 
         if args.clean:
             clean_temp_files(verbosity=verbosity)
-            print()
 
         if args.clean_previous:
             # Warn if --clean-previous will delete files specified via --input-*.
@@ -4293,7 +4275,6 @@ def main() -> None:
                 session_id=session.session_id,
                 verbosity=verbosity,
             )
-            print()
 
         # If only cleaning was requested (no recovery/compaction), exit early.
         clean_only = (
@@ -4371,11 +4352,9 @@ def main() -> None:
                 log("Temporary export cleaned up.", verbosity)
 
         if generated_paths:
-            print()
-            print(color_green("Recovery files generated:"))
+            print("Recovery files generated:")
             for path in generated_paths:
-                print(f"  {color_cyan(str(path))}")
-                pass
+                print(f"  {path}")
 
             # If --compact (or --use-model) is specified, run compaction via LLM.
             compacted_path: Path | None = None
