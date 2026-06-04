@@ -2259,12 +2259,14 @@ class SessionListScreen(Screen):
         table.add_column(f"Title{indicators[0]}", width=None)
         table.add_column(f"Updated{indicators[1]}", width=16)
         table.add_column(f"Created{indicators[2]}", width=16)
+        table.add_column("Size", width=8)
 
         for idx, session in enumerate(app.sessions, start=1):
             status = session_recovery_status(session.session_id, app.recovery_files)
             title = session.title if len(session.title) <= 50 else session.title[:47] + "..."
             updated = format_timestamp(session.updated, app.timestamp_mode)
             created = format_timestamp(session.created, app.timestamp_mode)
+            size_str = _get_session_data_size(session.session_id)
 
             table.add_row(
                 str(idx),
@@ -2272,6 +2274,7 @@ class SessionListScreen(Screen):
                 title,
                 updated,
                 created,
+                size_str,
                 key=session.session_id,
             )
 
@@ -2345,7 +2348,7 @@ class SessionListScreen(Screen):
         return None
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Handle Enter on a session row — open detail view."""
+        """Handle Enter on a session row — open Session Detail."""
         session = self._get_selected_session()
         if session:
             self.app.push_screen(SessionDetailScreen(session))

@@ -3252,10 +3252,16 @@ def db_list_sessions(project_id: str | None = None) -> list[dict[str, Any]]:
 
 
 def resolve_project(spec: str) -> dict[str, Any] | None:
-    """Resolve a project by ID, directory path, or substring match."""
+    """Resolve a project by number (from --list-projects), ID, directory path, or substring match."""
     projects = db_list_projects()
     if not projects:
         return None
+
+    # Try as a number (1-based index from --list-projects).
+    if spec.isdigit():
+        idx = int(spec) - 1
+        if 0 <= idx < len(projects):
+            return projects[idx]
 
     # Exact ID match.
     for p in projects:
@@ -3313,7 +3319,18 @@ def parse_args() -> argparse.Namespace:
     """
 
     parser = argparse.ArgumentParser(
-        description="Interactively export and recover an opencode session."
+        description="Export and recover opencode sessions. Generates restart-ready Markdown files and optionally compacts them via an LLM.",
+        epilog="""\
+Examples:
+  %(prog)s --list-projects                     List all projects
+  %(prog)s --project 3 --list-sessions         List sessions for project #3
+  %(prog)s --project pubrun --details 1        Show details for session #1
+  %(prog)s --project pubrun --details 1 --tail 5   Show last 5 exchanges
+  %(prog)s -s SESSION_ID -mi 50                Recover with max 50 interactions
+  %(prog)s -s SESSION_ID -m uri/its_direct/pt1-qwen3-32b-us   Recover + compact
+  %(prog)s --show-models                       List available LLM models
+""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     parser.add_argument(
@@ -3785,11 +3802,11 @@ def main() -> None:
             if len(directory) > 70:
                 directory = "..." + directory[-67:]
             updated = format_timestamp(str(p["last_updated"]))
-            print(f"  {color_cyan(f'{idx:>3}.')} {directory}")
             count = p["session_count"]
-            print(f"       {color_dim(f'{count} sessions, last active: {updated}')}")
+            print(f"  {idx:>3}. {color_bold(directory)}")
+            print(f"       {count} sessions, last active: {updated}")
         print()
-        print(color_dim("Use --project <directory_or_id> with --list-sessions to see sessions."))
+        print("Use --project <number_or_directory> with --list-sessions to see sessions.")
         return
 
     # Handle --list-sessions early.
@@ -3824,11 +3841,11 @@ def main() -> None:
                 title = title[:57] + "..."
             updated = format_timestamp(str(s["updated"]))
             project_hint = f"  [{s['project_dir'][:30]}]" if not project_id and s["project_dir"] else ""
-            print(f"  {color_cyan(f'{idx:>3}.')} {color_bold(title)}{color_dim(project_hint)}")
+            print(f"  {idx:>3}. {color_bold(title)}{project_hint}")
             sid = s["id"]
-            print(f"       {color_dim(f'ID: {sid}  Updated: {updated}')}")
+            print(f"       ID: {sid}  Updated: {updated}")
         print()
-        print(color_dim("Use --details <number_or_id_or_title> to see session details."))
+        print("Use --details <number_or_id_or_title> to see session details.")
         return
 
     # Handle --details early.
